@@ -1,0 +1,93 @@
+/* Reusable card styles */
+.card {
+  width: 100%;
+  max-width: 380px;
+  min-width: 280px; /* Минимальная ширина, чтобы карточка не сжималась слишком сильно */
+  min-height: 120px;
+  padding: 16px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background-color: var(--bg-card);
+  color: var(--text-color);
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.02);
+  transition:
+    box-shadow 0.15s ease,
+    transform 0.12s ease;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  overflow: hidden; /* Предотвращает вылезание элементов за пределы карточки */
+  transform-origin: center; /* Для масштабирования через scale */
+}
+
+.card-title {
+  margin: 0 0 8px 0;
+  font-size: 16px;
+}
+
+.card-body {
+  flex: 1;
+}
+
+.card-footer {
+  margin-top: 12px;
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.card:hover {
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.12);
+  transform: translateY(-2px);
+}
+
+/* Basic form controls inside card */
+.card input[type="text"],
+.card input[type="email"],
+.card input[type="password"] {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-color);
+  margin-bottom: 10px;
+  box-sizing: border-box;
+}
+
+.card .btn {
+  padding: 8px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--border-color);
+  background: none;
+  color: var(--nav-text-inactive);
+  cursor: pointer;
+}
+
+.card .btn.primary {
+  background-color: var(--hover-color);
+  color: var(--nav-text-active);
+  border-color: var(--border-color);
+}
+
+.card .btn.danger {
+  background-color: var(--btn-danger);
+  color: #ffffff;
+  border-color: var(--btn-danger);
+}
+
+@media (max-width: 960px) {
+  .card {
+    flex: 1 1 calc(50% - 8px); /* Две карточки в ряд с gap */
+    max-width: none;
+    transform: scale(0.98); /* Лёгкое масштабирование */
+  }
+}
+
+@media (max-width: 600px) {
+  .card {
+    flex: 1 1 100%; /* Одна карточка в ряд */
+    max-width: none;
+    transform: scale(0.95); /* Масштабирование для лучшей адаптации */
+  }
+}

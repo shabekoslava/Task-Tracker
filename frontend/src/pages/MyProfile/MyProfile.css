@@ -1,0 +1,122 @@
+/* Minimal, non-duplicating styles for MyProfile page */
+.profile-page {
+  padding: 20px 24px;
+  background: var(--bg-app);
+  color: var(--text-color);
+}
+
+.profile-title {
+  margin: 0 0 18px 0;
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.profile-cards {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 16px;
+  align-items: stretch;
+}
+
+/* Small helpers for labels and spacing; inputs/buttons are styled in Card.css */
+.profile-cards label {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--nav-text-inactive);
+  font-size: 13px;
+}
+
+/* make inline action groups consistent */
+.profile-cards .actions-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+/* Avatar styles */
+.avatar-section {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+
+.avatar-image {
+  width: 100px;
+  height: 100px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 2px solid var(--border-color);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.avatar-image:hover {
+  border-color: var(--primary-color);
+  transform: scale(1.03);
+}
+
+/* Avatar placeholder with futuristic geometric pattern */
+.avatar-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: transparent;
+  background-image: 
+    radial-gradient(circle at 20% 30%, rgba(99, 102, 241, 0.15), transparent 60%),
+    radial-gradient(circle at 80% 70%, rgba(236, 72, 153, 0.2), transparent 60%),
+    linear-gradient(135deg, rgba(30, 41, 59, 0.1) 0%, rgba(15, 23, 42, 0.2) 100%);
+  background-size: cover;
+  position: relative;
+  overflow: hidden;
+  cursor: pointer;
+}
+
+.avatar-placeholder::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  opacity: 0.15;
+  background-image: 
+    radial-gradient(rgba(255, 255, 255, 0.15) 1px, transparent 0),
+    radial-gradient(rgba(255, 255, 255, 0.1) 1px, transparent 0);
+  background-size: 8px 8px;
+  background-position: 0 0, 4px 4px;
+}
+
+.avatar-placeholder:hover {
+  border-color: var(--primary-color);
+  box-shadow: 0 0 20px rgba(99, 102, 241, 0.25);
+}
+
+.avatar-placeholder-icon {
+  width: 32px;
+  height: 32px;
+  color: var(--nav-text-inactive);
+  opacity: 0.7;
+  z-index: 1;
+  transition: all 0.3s ease;
+}
+
+.avatar-placeholder:hover .avatar-placeholder-icon {
+  color: var(--primary-color);
+  transform: scale(1.1);
+  opacity: 1;
+}
+
+.avatar-input {
+  padding: 8px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-color);
+}
+
+@media (max-width: 480px) {
+  .profile-page {
+    padding: 12px;
+  }
+}

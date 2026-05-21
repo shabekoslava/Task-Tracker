@@ -1,0 +1,250 @@
+/* src/pages/Auth/Auth.css */
+
+.auth-background-wrapper {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background-color: #0b0c10;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  overflow: hidden;
+  z-index: 9999;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  color: #f1f5f9;
+}
+
+/* Glowing Neon Background Shapes */
+.auth-background-shapes {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.auth-background-shapes .shape {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(120px);
+  opacity: 0.45;
+  animation: floatShape 12s infinite alternate ease-in-out;
+}
+
+.auth-background-shapes .shape-1 {
+  width: 350px;
+  height: 350px;
+  background: radial-gradient(circle, #3b82f6 0%, #1d4ed8 100%);
+  top: 15%;
+  left: 15%;
+}
+
+.auth-background-shapes .shape-2 {
+  width: 400px;
+  height: 400px;
+  background: radial-gradient(circle, #8b5cf6 0%, #6d28d9 100%);
+  bottom: 10%;
+  right: 15%;
+  animation-delay: -6s;
+}
+
+@keyframes floatShape {
+  0% {
+    transform: translate(0, 0) scale(1);
+  }
+  100% {
+    transform: translate(50px, 30px) scale(1.15);
+  }
+}
+
+/* Glassmorphic Auth Card */
+.auth-card-container {
+  position: relative;
+  width: 100%;
+  max-width: 450px;
+  padding: 40px;
+  background: rgba(24, 27, 33, 0.75);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 16px;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  z-index: 10;
+  box-sizing: border-box;
+}
+
+.auth-card-header {
+  text-align: center;
+  margin-bottom: 30px;
+}
+
+.auth-logo {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.auth-logo-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  background-color: #3b82f6;
+  color: #ffffff;
+  border-radius: 6px;
+  font-weight: bold;
+  font-size: 16px;
+}
+
+.auth-logo-text {
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.5px;
+  color: #ffffff;
+}
+
+.auth-card-header h2 {
+  font-size: 24px;
+  font-weight: 600;
+  color: #ffffff;
+  margin: 0 0 8px 0;
+}
+
+.auth-subtitle {
+  font-size: 14px;
+  color: #94a3b8;
+  margin: 0;
+  line-height: 1.4;
+}
+
+/* Error Box */
+.auth-error-box {
+  background: rgba(239, 68, 68, 0.15);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  color: #fca5a5;
+  padding: 12px 16px;
+  border-radius: 8px;
+  font-size: 13.5px;
+  margin-bottom: 24px;
+  text-align: center;
+  animation: shake 0.4s ease;
+}
+
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-5px); }
+  75% { transform: translateX(5px); }
+}
+
+/* Forms & Fields */
+.auth-form {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.auth-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.auth-field label {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: #cbd5e1;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.auth-field input {
+  width: 100%;
+  padding: 12px 16px;
+  background: rgba(15, 17, 21, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  color: #ffffff;
+  font-size: 14.5px;
+  outline: none;
+  transition: all 0.25s ease;
+  box-sizing: border-box;
+}
+
+.auth-field input:focus {
+  border-color: #3b82f6;
+  background: rgba(15, 17, 21, 0.9);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.25);
+}
+
+.auth-field input::placeholder {
+  color: #64748b;
+}
+
+/* Submit Button */
+.auth-submit-btn {
+  width: 100%;
+  padding: 14px;
+  margin-top: 10px;
+  background: #3b82f6;
+  border: none;
+  border-radius: 8px;
+  color: #ffffff;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+}
+
+.auth-submit-btn:hover {
+  background: #2563eb;
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgba(59, 130, 246, 0.4);
+}
+
+.auth-submit-btn:active {
+  transform: translateY(0);
+}
+
+/* Footer Switch Links */
+.auth-footer-toggle {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  margin-top: 28px;
+  font-size: 13.5px;
+  color: #94a3b8;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  padding-top: 20px;
+}
+
+.auth-toggle-link {
+  background: none;
+  border: none;
+  color: #3b82f6;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0;
+  font-size: 13.5px;
+  transition: color 0.15s ease;
+}
+
+.auth-toggle-link:hover {
+  color: #60a5fa;
+  text-decoration: underline;
+}
+
+/* Adapt for small screen heights or widths */
+@media (max-width: 500px) {
+  .auth-card-container {
+    max-width: calc(100% - 32px);
+    padding: 30px 20px;
+  }
+}

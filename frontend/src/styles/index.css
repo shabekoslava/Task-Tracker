@@ -1,0 +1,117 @@
+/* --- ГЛОБАЛЬНЫЕ СБРОСЫ --- */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  min-inline-size: 375px;
+  margin: 0 auto;
+  /* Убираем стандартные отступы браузера, чтобы приложение заняло весь экран */
+  height: 100vh;
+  font-family: sans-serif;
+  background-color: var(--bg-main);
+  color: var(--text-primary);
+  transition:
+    background-color 0.3s ease,
+    color 0.3s ease;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6,
+p,
+ul,
+picture {
+  margin: 0;
+  padding: 0;
+}
+
+ul {
+  list-style: none;
+}
+
+button,
+a {
+  color: currentColor;
+  font-family: inherit;
+  font-size: inherit;
+  line-height: inherit;
+}
+
+#root {
+  height: 100%;
+}
+
+/* --- ТЕМЫ И ПЕРЕМЕННЫЕ --- */
+:root {
+  --sidebar-width-open: 220px;
+  --sidebar-width-closed: 60px;
+  --header-height: 56px;
+  
+  /* Темная тема (по умолчанию) */
+  --bg-main: #0f1115; /* Глубокий темный фон */
+  --bg-surface: #181b21; /* Фон сайдбара и хедера */
+  --bg-app: #0f1115; /* Фон страницы */
+  --text-primary: #f1f5f9;
+  --text-color: #f1f5f9;
+  --nav-text-inactive: #94a3b8;
+  --nav-text-active: #ffffff;
+  --border-color: #2a2e37;
+  --hover-color: #222630;
+  
+  /* Icon colors */
+  --icon-active: #3b82f6;
+  --icon-inactive: #94a3b8;
+  --icon-size: 20px;
+  --icon-stroke-width: 1.5px;
+  
+  /* Kanban Colors */
+  --bg-kanban-column: #181b21;
+  --bg-card: #222630;
+  --bg-card-hover: #292d38;
+  --kanban-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3), 0 2px 4px -1px rgba(0, 0, 0, 0.2);
+  --modal-overlay: rgba(0, 0, 0, 0.6);
+  --modal-bg: #1e222b;
+  
+  /* Common */
+  --btn-primary: #3b82f6;
+  --btn-primary-hover: #2563eb;
+  --btn-danger: #ef4444;
+  --tag-bg: rgba(59, 130, 246, 0.15);
+  --tag-text: #60a5fa;
+  --accent-color: #3b82f6;
+}
+
+/* Светлая тема */
+body.light-theme {
+  --bg-main: #f8fafc;
+  --bg-surface: #ffffff;
+  --bg-app: #f8fafc;
+  --text-primary: #0f172a;
+  --text-color: #0f172a;
+  --nav-text-inactive: #64748b;
+  --nav-text-active: #0f172a;
+  --border-color: #e2e8f0;
+  --hover-color: #f1f5f9;
+  
+  /* Icon colors */
+  --icon-active: #2563eb;
+  --icon-inactive: #64748b;
+  
+  /* Kanban Colors */
+  --bg-kanban-column: #f1f5f9;
+  --bg-card: #ffffff;
+  --bg-card-hover: #f8fafc;
+  --kanban-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06);
+  --modal-overlay: rgba(15, 23, 42, 0.4);
+  --modal-bg: #ffffff;
+  
+  /* Common */
+  --tag-bg: rgba(37, 99, 235, 0.1);
+  --tag-text: #2563eb;
+}

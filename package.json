@@ -1,0 +1,10 @@
+{
+  "name": "project-root",
+  "version": "1.0.0",
+  "description": "Root configuration to run scripts in the frontend folder",
+  "scripts": {
+    "dev": "npm --prefix frontend run dev",
+    "build": "npm --prefix frontend run build",
+    "install:all": "npm --prefix frontend install"
+  }
+}

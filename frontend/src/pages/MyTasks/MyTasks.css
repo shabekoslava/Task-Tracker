@@ -1,0 +1,346 @@
+/* src/pages/MyTasks/MyTasks.css */
+
+.tasks-page {
+  display: flex;
+  flex-direction: column;
+  gap: 32px;
+}
+
+/* Header Summary Block */
+.tasks-summary {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 16px;
+  background: var(--bg-surface);
+  padding: 24px;
+  border-radius: 16px;
+  border: 1px solid var(--border-color);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+}
+
+.tasks-summary h2 {
+  font-size: 26px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0 0 6px 0;
+  letter-spacing: -0.5px;
+}
+
+.tasks-summary p {
+  color: var(--nav-text-inactive);
+  font-size: 14px;
+  margin: 0;
+}
+
+.task-count {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.05);
+  padding: 8px 16px;
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+  display: inline-flex;
+  align-items: center;
+}
+
+.task-count.urgent-badge {
+  background: rgba(239, 68, 68, 0.1);
+  border-color: rgba(239, 68, 68, 0.2);
+  color: #ef4444;
+}
+
+/* Groups Container */
+.tasks-groups-container {
+  display: flex;
+  flex-direction: column;
+  gap: 40px;
+}
+
+/* Individual Urgency Sections */
+.tasks-group-section {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  border-left: 4px solid var(--group-color, var(--border-color));
+  padding-left: 20px;
+  transition: all 0.3s ease;
+}
+
+/* Group Specific Color Variables (Agile IT Palette) */
+.group-overdue {
+  --group-color: #ef4444;
+  --group-color-rgb: 239, 68, 68;
+}
+.group-urgent {
+  --group-color: #f97316;
+  --group-color-rgb: 249, 115, 22;
+}
+.group-thisweek {
+  --group-color: #8b5cf6;
+  --group-color-rgb: 139, 92, 246;
+}
+.group-later {
+  --group-color: #14b8a6;
+  --group-color-rgb: 20, 184, 166;
+}
+.group-nodeadline {
+  --group-color: #64748b;
+  --group-color-rgb: 100, 116, 139;
+}
+.group-completed {
+  --group-color: #10b981;
+  --group-color-rgb: 16, 185, 129;
+}
+
+/* Group Headers */
+.group-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 12px;
+  background: rgba(var(--group-color-rgb), 0.08);
+  border-radius: 8px;
+  width: fit-content;
+  border: 1px solid rgba(var(--group-color-rgb), 0.15);
+  box-shadow: 0 4px 12px rgba(var(--group-color-rgb), 0.04);
+}
+
+.group-icon {
+  font-size: 18px;
+}
+
+.group-header h3 {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.group-badge {
+  background: var(--group-color);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 10px;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.2);
+}
+
+/* Grid Layout for task cards inside groups */
+.task-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 20px;
+}
+
+/* Clean Task Cards */
+.task-card {
+  background: var(--bg-card);
+  border-radius: 12px;
+  padding: 20px;
+  box-shadow: var(--kanban-shadow);
+  border: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;
+  overflow: hidden;
+}
+
+.task-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 3px;
+  background: linear-gradient(90deg, var(--group-color), rgba(var(--group-color-rgb), 0.3));
+}
+
+.task-card:hover {
+  transform: translateY(-4px);
+  border-color: rgba(var(--group-color-rgb), 0.35);
+  box-shadow: 0 12px 24px -4px rgba(0, 0, 0, 0.3), 0 4px 12px rgba(var(--group-color-rgb), 0.08);
+  background: var(--bg-card-hover);
+}
+
+.task-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.project-badge {
+  font-size: 11px;
+  font-weight: 600;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--nav-text-inactive);
+  padding: 4px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border-color);
+}
+
+/* Priority Badges */
+.priority-badge {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+.priority-critical {
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+}
+.priority-high {
+  background: rgba(249, 115, 22, 0.15);
+  color: #f97316;
+}
+.priority-medium {
+  background: rgba(59, 130, 246, 0.15);
+  color: #3b82f6;
+}
+.priority-low {
+  background: rgba(16, 185, 129, 0.15);
+  color: #10b981;
+}
+
+.task-card h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+  line-height: 1.4;
+}
+
+.task-description {
+  color: var(--nav-text-inactive);
+  font-size: 13.5px;
+  line-height: 1.5;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  margin: 0;
+}
+
+/* Tags spacing */
+.task-tags-container {
+  margin-top: 4px;
+}
+
+.task-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.tag-pill {
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--nav-text-inactive);
+  font-size: 11px;
+  font-weight: 500;
+  border: 1px solid var(--border-color);
+}
+
+/* Completed Tasks Archive State */
+.task-card.completed {
+  opacity: 0.65;
+  border-color: rgba(16, 185, 129, 0.15);
+}
+.task-card.completed h3 {
+  text-decoration: line-through;
+  color: var(--nav-text-inactive);
+}
+
+/* Footer & Estimate/Deadlines */
+.task-footer {
+  margin-top: 8px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-top: 1px solid var(--border-color);
+  padding-top: 14px;
+}
+
+.task-meta {
+  display: flex;
+  gap: 12px;
+  color: var(--nav-text-inactive);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.due-date-meta {
+  color: var(--nav-text-inactive);
+  background: rgba(255, 255, 255, 0.03);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+.due-date-meta.text-danger {
+  color: #ef4444;
+  background: rgba(239, 68, 68, 0.1);
+  font-weight: 600;
+}
+
+.comments-count-badge {
+  font-size: 12px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border-color);
+  padding: 4px 10px;
+  border-radius: 20px;
+  color: var(--nav-text-inactive);
+  font-weight: 600;
+}
+
+/* Empty State Styles */
+.task-card.empty-state {
+  align-items: center;
+  justify-content: center;
+  padding: 60px 40px;
+  text-align: center;
+  border-style: dashed;
+  border-color: var(--border-color);
+  background: rgba(255, 255, 255, 0.01);
+}
+
+.task-card.empty-state::before {
+  display: none;
+}
+
+.empty-state-icon {
+  width: 48px;
+  height: 48px;
+  color: var(--nav-text-inactive);
+  margin-bottom: 16px;
+  opacity: 0.6;
+}
+
+.task-card.empty-state h3 {
+  font-size: 18px;
+  margin-bottom: 8px;
+}
+
+.task-card.empty-state p {
+  max-width: 400px;
+  font-size: 14px;
+  color: var(--nav-text-inactive);
+  line-height: 1.6;
+}
+
+@media (max-width: 768px) {
+  .task-grid {
+    grid-template-columns: 1fr;
+  }
+  .tasks-group-section {
+    padding-left: 14px;
+  }
+}

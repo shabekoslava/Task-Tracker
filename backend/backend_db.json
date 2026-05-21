@@ -1,0 +1,266 @@
+{
+  "users": [
+    {
+      "id": "INV-1529",
+      "name": "Иван Иванов",
+      "email": "ivan@example.com",
+      "password": "123"
+    },
+    {
+      "id": "INV-7589",
+      "name": "Вячеслав",
+      "email": "shabeko.slava@mail.ru",
+      "password": "Slava2005"
+    }
+  ],
+  "projects": [
+    {
+      "id": "1779387266878",
+      "name": "jmhj",
+      "members": [],
+      "columns": [
+        {
+          "id": "1779387266878-todo",
+          "name": "В ожидании",
+          "taskIds": []
+        },
+        {
+          "id": "1779387266878-inwork",
+          "name": "В работе",
+          "taskIds": []
+        },
+        {
+          "id": "1779387266878-review",
+          "name": "На проверку",
+          "taskIds": []
+        },
+        {
+          "id": "1779387266878-done",
+          "name": "Выполнено",
+          "taskIds": []
+        }
+      ],
+      "tasks": {}
+    },
+    {
+      "id": "1779387792496",
+      "name": "пркркек",
+      "members": [],
+      "columns": [
+        {
+          "id": "1779387792496-todo",
+          "name": "В ожидании",
+          "taskIds": []
+        },
+        {
+          "id": "1779387792496-inwork",
+          "name": "В работе",
+          "taskIds": []
+        },
+        {
+          "id": "1779387792496-review",
+          "name": "На проверку",
+          "taskIds": []
+        },
+        {
+          "id": "1779387792496-done",
+          "name": "Выполнено",
+          "taskIds": []
+        }
+      ],
+      "tasks": {}
+    },
+    {
+      "id": "1779390293786",
+      "name": "тоо",
+      "members": [
+        {
+          "id": "INV-7589",
+          "role": "admin"
+        }
+      ],
+      "columns": [
+        {
+          "id": "1779390293786-todo",
+          "name": "В ожидании",
+          "taskIds": [
+            "task-1779391156748"
+          ]
+        },
+        {
+          "id": "1779390293786-inwork",
+          "name": "В работе",
+          "taskIds": [
+            "task-1779390301056"
+          ]
+        },
+        {
+          "id": "1779390293786-review",
+          "name": "На проверку",
+          "taskIds": []
+        },
+        {
+          "id": "1779390293786-done",
+          "name": "Выполнено",
+          "taskIds": []
+        }
+      ],
+      "tasks": {
+        "task-1779390301056": {
+          "id": "task-1779390301056",
+          "title": "арап",
+          "description": "",
+          "assignedTo": "INV-7589",
+          "tags": [
+            "gjhy",
+            "fdf"
+          ],
+          "deadline": "2026-06-05",
+          "estimate": "",
+          "sprint": "1",
+          "priority": "Критичный",
+          "completed": false,
+          "comments": [
+            {
+              "id": "comment-1779391546616",
+              "text": "рапр",
+              "createdAt": "2026-05-21T19:25:46.616Z"
+            }
+          ],
+          "createdAt": "2026-05-21T19:05:01.056Z"
+        },
+        "task-1779391156748": {
+          "id": "task-1779391156748",
+          "title": "вава",
+          "description": "",
+          "assignedTo": "INV-7589",
+          "tags": [],
+          "deadline": "2026-05-23",
+          "estimate": "",
+          "sprint": "",
+          "priority": "Средний",
+          "completed": false,
+          "comments": [],
+          "createdAt": "2026-05-21T19:19:16.748Z"
+        }
+      }
+    }
+  ],
+  "invitations": [],
+  "chats": [
+    {
+      "id": "personal-chat-INV-7589-alex",
+      "name": "👤 Алексей Смирнов",
+      "type": "personal",
+      "members": [
+        "INV-7589",
+        "alex"
+      ],
+      "messages": [
+        {
+          "id": "msg-welcome-1779391470520",
+          "text": "Диалог с пользователем Алексей Смирнов начат.",
+          "createdAt": "2026-05-21T19:24:30.520Z",
+          "authorId": "System",
+          "status": "read"
+        },
+        {
+          "id": "msg-1779391557694",
+          "text": "апра",
+          "createdAt": "2026-05-21T19:25:57.694Z",
+          "authorId": "INV-7589",
+          "status": "delivered"
+        }
+      ]
+    },
+    {
+      "id": "project-chat-1779390293786",
+      "name": "📂 Проект: тоо",
+      "type": "project",
+      "projectId": "1779390293786",
+      "members": [
+        "INV-7589"
+      ],
+      "messages": [
+        {
+          "id": "msg-1779391528774",
+          "text": "вппр",
+          "createdAt": "2026-05-21T19:25:28.774Z",
+          "authorId": "INV-7589",
+          "status": "delivered"
+        },
+        {
+          "id": "msg-1779391536322",
+          "text": "симтми",
+          "createdAt": "2026-05-21T19:25:36.322Z",
+          "authorId": "INV-7589",
+          "status": "delivered"
+        },
+        {
+          "id": "msg-1779391563567",
+          "text": "рапрап",
+          "createdAt": "2026-05-21T19:26:03.567Z",
+          "authorId": "INV-7589",
+          "status": "delivered"
+        }
+      ]
+    },
+    {
+      "id": "task-chat-task-1779390301056",
+      "name": "📅 Задача: арап",
+      "type": "task",
+      "projectId": "1779390293786",
+      "taskId": "task-1779390301056",
+      "taskName": "арап",
+      "members": [
+        "INV-7589"
+      ],
+      "messages": [
+        {
+          "id": "msg-1779391546215",
+          "text": "рапр",
+          "createdAt": "2026-05-21T19:25:46.215Z",
+          "authorId": "INV-7589",
+          "status": "delivered"
+        }
+      ]
+    },
+    {
+      "id": "group-chat-1779391732447",
+      "name": "👥 ррт",
+      "type": "group",
+      "members": [
+        "INV-7589",
+        "alex",
+        "dmitry"
+      ],
+      "messages": [
+        {
+          "id": "msg-welcome-1779391732447",
+          "text": "Групповой чат \"ррт\" успешно создан.",
+          "createdAt": "2026-05-21T19:28:52.447Z",
+          "authorId": "System",
+          "status": "read"
+        }
+      ]
+    },
+    {
+      "id": "personal-chat-INV-7589-dmitry",
+      "name": "👤 Дмитрий Иванов",
+      "type": "personal",
+      "members": [
+        "INV-7589",
+        "dmitry"
+      ],
+      "messages": [
+        {
+          "id": "msg-welcome-1779391739839",
+          "text": "Диалог с пользователем Дмитрий Иванов начат.",
+          "createdAt": "2026-05-21T19:28:59.839Z",
+          "authorId": "System",
+          "status": "read"
+        }
+      ]
+    }
+  ]
+}
