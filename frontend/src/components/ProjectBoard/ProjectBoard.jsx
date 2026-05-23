@@ -26,7 +26,7 @@ const renderMarkdown = (text, onEditClick, canEdit) => {
         onClick={canEdit ? onEditClick : undefined}
         style={{ fontStyle: 'italic', color: 'var(--nav-text-inactive)', cursor: canEdit ? 'pointer' : 'default', padding: '10px 14px', background: 'rgba(255,255,255,0.02)', border: '1px dashed var(--border-color)', borderRadius: '8px' }}
       >
-        Описание отсутствует. Нажмите, чтобы добавить...
+        Нажмите, чтобы добавить описание к задаче...
       </div>
     );
   }
@@ -72,6 +72,7 @@ export default function ProjectBoard({
   onDeleteColumn,
   onAddTask,
   onEditTask,
+  onDeleteTask,
   onAddComment,
   onToggleTaskComplete,
   onMoveTask,
@@ -285,7 +286,7 @@ export default function ProjectBoard({
                         description: e.target.value,
                       })
                     }
-                    placeholder="Добавьте подробное описание. Поддерживаются **жирный**, *курсив*, # заголовки и - списки..."
+                    placeholder="Что нужно сделать? (поддерживается разметка Markdown: **bold**, *italic*, # заголовки...)"
                     rows={6}
                     style={{ fontFamily: 'inherit', fontSize: '14px', lineHeight: '1.6' }}
                   />
@@ -301,7 +302,7 @@ export default function ProjectBoard({
               {/* Чек-лист подзадач */}
               <div className="subtasks-section" style={{ marginBottom: '24px', borderTop: '1px solid var(--border-color)', paddingTop: '20px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-                  <h4 style={{ margin: 0, fontSize: '14px', fontWeight: '600', color: 'var(--text-primary)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>📋 Чек-лист подзадач</h4>
+                  <h4 style={{ margin: 0, fontSize: '14px', fontWeight: '600', color: 'var(--text-primary)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>📋 Подзадачи</h4>
                   {editTaskDraft.subtasks && editTaskDraft.subtasks.length > 0 && (
                     <span style={{ fontSize: '12px', color: 'var(--nav-text-inactive)' }}>
                       {editTaskDraft.subtasks.filter(s => s.completed).length} из {editTaskDraft.subtasks.length} ({Math.round((editTaskDraft.subtasks.filter(s => s.completed).length / editTaskDraft.subtasks.length) * 100)}%)
@@ -365,7 +366,7 @@ export default function ProjectBoard({
                     </div>
                   ))}
                   {(editTaskDraft.subtasks || []).length === 0 && (
-                    <p style={{ color: 'var(--nav-text-inactive)', fontSize: '13px', fontStyle: 'italic', margin: 0 }}>Подзадачи пока отсутствуют</p>
+                    <p style={{ color: 'var(--nav-text-inactive)', fontSize: '13px', margin: 0 }}>Список подзадач пуст</p>
                   )}
                 </div>
 
@@ -375,7 +376,7 @@ export default function ProjectBoard({
                     <input
                       type="text"
                       id="new-subtask-title-input"
-                      placeholder="Напишите название подзадачи..."
+                      placeholder="Добавить новый шаг..."
                       style={{ flex: 1, padding: '8px 12px', fontSize: '13.5px', background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: '8px', color: 'var(--text-primary)' }}
                       onKeyDown={(e) => {
                         if (e.key === 'Enter') {
@@ -435,7 +436,7 @@ export default function ProjectBoard({
                       </div>
                     ))
                   ) : (
-                    <p className="no-comments">Пока нет комментариев</p>
+                    <p className="no-comments">Комментариев пока нет. Начните обсуждение!</p>
                   )}
                 </div>
                 <div className="comment-input-area">
@@ -443,7 +444,7 @@ export default function ProjectBoard({
                     type="text"
                     value={commentDraft}
                     onChange={(e) => setCommentDraft(e.target.value)}
-                    placeholder={canComment ? "Написать комментарий..." : "Комментарии отключены (Режим просмотра)"}
+                    placeholder={canComment ? "Напишите комментарий или задайте вопрос..." : "Комментарии отключены (режим просмотра)"}
                     disabled={!canComment}
                     onKeyDown={(e) => {
                       if (e.key === "Enter") handleAddComment();
@@ -690,6 +691,20 @@ export default function ProjectBoard({
           </div>
 
           <div className="modal-footer">
+            {canEditTasks && (
+              <button
+                className="btn danger"
+                style={{ marginRight: "auto" }}
+                onClick={() => {
+                  if (window.confirm("Вы действительно хотите удалить эту задачу?")) {
+                    onDeleteTask(project.id, activeTaskId);
+                    closeTaskModal();
+                  }
+                }}
+              >
+                🗑️ Удалить задачу
+              </button>
+            )}
             <button className="btn secondary" onClick={closeTaskModal}>
               {canEditTasks ? "Отмена" : "Закрыть"}
             </button>
@@ -799,7 +814,7 @@ export default function ProjectBoard({
                       name: projectNameDraft.trim(),
                       description: projectDescDraft.trim(),
                     });
-                    alert("Настройки проекта успешно сохранены!");
+                    alert("Изменения сохранены!");
                   }}
                   style={{ alignSelf: 'flex-start' }}
                 >
@@ -864,10 +879,10 @@ export default function ProjectBoard({
                 </div>
               </div>
 
-              {/* Quick Invite User Box (Admin Only) */}
-              {currentUserRole === "admin" && (
+              {/* Quick Invite User Box */}
+              {currentUserRole !== "viewer" && (
                 <div style={{ background: 'rgba(255, 255, 255, 0.02)', border: '1px solid var(--border-color)', borderRadius: '12px', padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                  <h4 style={{ margin: 0, fontSize: '14px', fontWeight: '600', color: 'var(--text-primary)' }}>Добавить участника напрямую</h4>
+                  <h4 style={{ margin: 0, fontSize: '14px', fontWeight: '600', color: 'var(--text-primary)' }}>Добавить участника</h4>
                   <div style={{ display: 'flex', gap: '10px' }}>
                     <input
                       type="text"
@@ -891,11 +906,11 @@ export default function ProjectBoard({
                         if (!inviteUserIdDraft.trim()) return;
                         const success = onInviteUser(project.id, inviteUserIdDraft.trim(), inviteUserRoleDraft);
                         if (success) {
-                          alert(`Пользователь ${inviteUserIdDraft.trim()} успешно добавлен в команду проекта с ролью ${inviteUserRoleDraft === 'admin' ? 'Админ' : inviteUserRoleDraft === 'member' ? 'Участник' : 'Наблюдатель'}!`);
+                          alert("Участник добавлен!");
                           setInviteUserIdDraft("");
                           setInviteUserRoleDraft("member");
                         } else {
-                          alert("Пользователь уже в проекте или ID некорректен.");
+                          alert("Не удалось добавить: проверьте ID или пользователь уже состоит в проекте.");
                         }
                       }}
                     >
@@ -1229,6 +1244,24 @@ export default function ProjectBoard({
               </div>
             </div>
           ))}
+          {canManageColumns && (
+            <div className="board-column add-column-special-card" style={{ background: "rgba(255, 255, 255, 0.02)", border: "1px dashed var(--border-color)", justifyContent: "center", alignItems: "center", padding: "20px", height: "fit-content", minHeight: "100px", alignSelf: "flex-start", cursor: "pointer" }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: "10px", width: "100%" }}>
+                <h4 style={{ margin: 0, fontSize: "14px", fontWeight: "600", color: "var(--text-primary)" }}>Добавить колонку</h4>
+                <input
+                  type="text"
+                  value={newColumnName}
+                  onChange={(e) => setNewColumnName(e.target.value)}
+                  placeholder="Название новой колонки..."
+                  onKeyDown={(e) => e.key === "Enter" && handleAddColumn()}
+                  style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid var(--border-color)", background: "var(--bg-card)", color: "var(--text-primary)", outline: "none", fontSize: "13.5px" }}
+                />
+                <button className="btn primary full-width" onClick={handleAddColumn} style={{ marginTop: 0 }}>
+                  + Добавить колонку
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

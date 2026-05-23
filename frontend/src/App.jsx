@@ -311,10 +311,10 @@ export default function App() {
     );
 
     if (success) {
-      alert("Вы успешно приняли приглашение и присоединились к проекту!");
+      alert("Добро пожаловать в проект! Приглашение успешно принято.");
       setCurrentTab(`project-${projectId}`);
     } else {
-      alert("Не удалось присоединиться. Возможно, вы уже состоите в этом проекте.");
+      alert("Не удалось войти: вы уже состоите в этом проекте.");
     }
   };
 
@@ -548,6 +548,25 @@ export default function App() {
     );
   };
 
+  const deleteTask = (projectId, taskId) => {
+    setProjects((prev) =>
+      prev.map((project) => {
+        if (project.id !== projectId) return project;
+        const updatedTasks = { ...project.tasks };
+        delete updatedTasks[taskId];
+        const updatedColumns = project.columns.map((column) => ({
+          ...column,
+          taskIds: column.taskIds.filter((id) => id !== taskId),
+        }));
+        return {
+          ...project,
+          tasks: updatedTasks,
+          columns: updatedColumns,
+        };
+      })
+    );
+  };
+
   const addComment = (projectId, taskId, text) => {
     const trimmed = text.trim();
     if (!trimmed) return false;
@@ -677,6 +696,7 @@ export default function App() {
           onDeleteColumn={deleteColumn}
           onAddTask={addTask}
           onEditTask={editTask}
+          onDeleteTask={deleteTask}
           onAddComment={addComment}
           onToggleTaskComplete={toggleTaskComplete}
           onMoveTask={moveTask}

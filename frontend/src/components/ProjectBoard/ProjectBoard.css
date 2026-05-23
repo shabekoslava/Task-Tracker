@@ -133,7 +133,7 @@
 /* Columns Scroll Area */
 .board-scroll {
   display: flex;
-  align-items: flex-start; /* Collapses empty/short columns to their natural content height */
+  align-items: stretch; /* Stretches columns to 100% height to trigger vertical scrollbar inside columns */
   gap: 16px;
   overflow-x: auto;
   overflow-y: hidden;
@@ -152,6 +152,9 @@
 .board-scroll::-webkit-scrollbar-thumb {
   background: var(--border-color);
   border-radius: 4px;
+}
+.board-scroll::-webkit-scrollbar-thumb:hover {
+  background: var(--btn-primary); /* Vibrant premium purple accent on hover */
 }
 
 /* Column */
@@ -244,6 +247,9 @@
   background: var(--border-color);
   border-radius: 3px;
 }
+.column-tasks::-webkit-scrollbar-thumb:hover {
+  background: var(--btn-primary); /* Vibrant premium purple accent on hover */
+}
 
 /* Dynamic downward column stretching when card is dragged over */
 .board-column.drag-hover .column-tasks {
@@ -262,6 +268,7 @@
   display: flex;
   flex-direction: column;
   gap: 10px;
+  flex-shrink: 0; /* Prevent tasks from compressing and ensure they preserve natural height */
 }
 
 .task-card:hover {
