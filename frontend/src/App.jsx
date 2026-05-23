@@ -16,6 +16,7 @@ export default function App() {
   const [isDark, setIsDark] = useState(true);
   const [initialProjectTab, setInitialProjectTab] = useState("board"); // "board" | "settings"
   const [initialActiveTaskId, setInitialActiveTaskId] = useState(null);
+  const [openedFromMyTasks, setOpenedFromMyTasks] = useState(false);
 
 
   // 👤 Auth State: loaded from localStorage session
@@ -411,6 +412,13 @@ export default function App() {
     }
   };
 
+  const deleteProject = (projectId) => {
+    setProjects((prev) => prev.filter((p) => p.id !== projectId));
+    if (currentTab === `project-${projectId}`) {
+      setCurrentTab("Мои проекты");
+    }
+  };
+
   const addProjectTag = (projectId, tag) => {
     const trimmed = tag.trim();
     if (!trimmed) return;
@@ -730,12 +738,19 @@ export default function App() {
           onInviteUser={inviteUser}
           onChangeRole={changeUserRole}
           onLeaveProject={leaveProject}
+          onDeleteProject={deleteProject}
           currentUserId={currentUserId}
           initialViewMode={initialProjectTab}
           onAddProjectTag={addProjectTag}
           onRemoveProjectTag={removeProjectTag}
           initialActiveTaskId={initialActiveTaskId}
           onClearInitialActiveTaskId={() => setInitialActiveTaskId(null)}
+          onCloseTaskModal={() => {
+            if (openedFromMyTasks) {
+              setOpenedFromMyTasks(false);
+              setCurrentTab("Мои задачи");
+            }
+          }}
         />
       );
     }
@@ -748,6 +763,7 @@ export default function App() {
           onInviteUser={inviteUser}
           onChangeRole={changeUserRole}
           onLeaveProject={leaveProject}
+          onDeleteProject={deleteProject}
           currentUserId={currentUserId}
           openProject={openProject}
           onMoveProjectUp={moveProjectUp}
@@ -773,6 +789,7 @@ export default function App() {
           currentUserId={currentUserId}
           onToggleTaskComplete={toggleTaskComplete}
           onOpenTask={(projectId, taskId) => {
+            setOpenedFromMyTasks(true);
             setInitialActiveTaskId(taskId);
             openProject(projectId);
           }}

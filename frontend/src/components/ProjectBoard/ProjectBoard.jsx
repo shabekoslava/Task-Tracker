@@ -131,12 +131,14 @@ export default function ProjectBoard({
   onInviteUser,
   onChangeRole,
   onLeaveProject,
+  onDeleteProject,
   currentUserId,
   initialViewMode = "board",
   onAddProjectTag,
   onRemoveProjectTag,
   initialActiveTaskId = null,
   onClearInitialActiveTaskId = () => {},
+  onCloseTaskModal,
 }) {
   const [newColumnName, setNewColumnName] = useState("");
   const [editingColumnId, setEditingColumnId] = useState(null);
@@ -245,6 +247,9 @@ export default function ProjectBoard({
     setActiveTaskId(null);
     setEditTaskDraft({});
     setCommentDraft("");
+    if (onCloseTaskModal) {
+      onCloseTaskModal();
+    }
   };
 
   const saveTaskDetails = () => {
@@ -608,7 +613,7 @@ export default function ProjectBoard({
                       <input
                         type="text"
                         id="new-task-custom-tag-input"
-                        placeholder="Свой новый тег..."
+                        placeholder="Новый тег"
                         style={{ flex: 1, padding: '8px 10px', fontSize: '13px', borderRadius: '6px 0 0 6px', background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRight: 'none', color: 'var(--text-primary)', outline: 'none' }}
                         onKeyDown={(e) => {
                           if (e.key === 'Enter') {
@@ -796,20 +801,7 @@ export default function ProjectBoard({
             </button>
           </div>
 
-          {viewMode === "board" && canManageColumns && (
-            <div className="add-column-row">
-              <input
-                type="text"
-                value={newColumnName}
-                onChange={(e) => setNewColumnName(e.target.value)}
-                placeholder="Добавить колонку..."
-                onKeyDown={(e) => e.key === "Enter" && handleAddColumn()}
-              />
-              <button className="btn primary small" onClick={handleAddColumn}>
-                + Колонку
-              </button>
-            </div>
-          )}
+
         </div>
       </div>
 
@@ -1262,22 +1254,50 @@ export default function ProjectBoard({
                 )}
               </div>
 
-              {/* Leave project button (for non-admins or anyone) */}
-              <button
-                className="btn danger"
-                onClick={() => {
-                  if (
-                    window.confirm(
-                      "Вы действительно хотите покинуть этот проект?",
-                    )
-                  ) {
-                    onLeaveProject(project.id, currentUserId);
-                  }
-                }}
-                style={{ alignSelf: "flex-start", marginTop: "10px" }}
-              >
-                Выйти из проекта
-              </button>
+              <div style={{ display: "flex", gap: "12px", marginTop: "10px", flexWrap: "wrap" }}>
+                <button
+                  className="btn danger"
+                  onClick={() => {
+                    if (
+                      window.confirm(
+                        "Вы действительно хотите покинуть этот проект?",
+                      )
+                    ) {
+                      onLeaveProject(project.id, currentUserId);
+                    }
+                  }}
+                  style={{ alignSelf: "flex-start" }}
+                >
+                  Выйти из проекта
+                </button>
+                {currentUserRole === "admin" && (
+                  <button
+                    className="btn danger"
+                    onClick={() => {
+                      const password = window.prompt("Для удаления проекта введите ваш пароль от аккаунта:");
+                      if (password === null) return;
+                      
+                      const authUsers = JSON.parse(localStorage.getItem("auth_users") || "[]");
+                      const userRecord = authUsers.find(u => u.id === currentUserId);
+                      if (userRecord && password === userRecord.password) {
+                        if (window.confirm(`Вы уверены, что хотите полностью удалить проект "${project.name}"? Это действие со всеми его задачами абсолютно необратимо!`)) {
+                          onDeleteProject(project.id);
+                        }
+                      } else {
+                        alert("Неверный пароль. Удаление отменено.");
+                      }
+                    }}
+                    style={{
+                      background: "rgba(239, 68, 68, 0.15)",
+                      border: "1px solid #ef4444",
+                      color: "#ef4444",
+                      alignSelf: "flex-start"
+                    }}
+                  >
+                    🗑️ Удалить проект
+                  </button>
+                )}
+              </div>
             </div>
           </div>
         </div>
@@ -1505,7 +1525,7 @@ export default function ProjectBoard({
                       )}
 
                       <div className="task-card-badges" style={{ marginBottom: "8px" }}>
-                        {task.priority === "Срочно" || task.priority === "Критичный" || task.priority === "Высокий" ? (
+                        {(task.priority === "Срочно" || task.priority === "Критичный" || task.priority === "Высокий") && (
                           <span
                             className="badge-pill priority-critical"
                             style={{
@@ -1515,17 +1535,6 @@ export default function ProjectBoard({
                             }}
                           >
                             🔥 Срочно
-                          </span>
-                        ) : (
-                          <span
-                            className="badge-pill priority-low"
-                            style={{
-                              background: "rgba(148, 163, 184, 0.15)",
-                              color: "#94a3b8",
-                              fontWeight: "500",
-                            }}
-                          >
-                            Не срочно
                           </span>
                         )}
                         {task.sprint && (

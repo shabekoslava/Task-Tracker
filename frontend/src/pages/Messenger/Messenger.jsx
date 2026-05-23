@@ -19,6 +19,21 @@ export default function Messenger({
   const [newGroupName, setNewGroupName] = useState("");
   const [selectedGroupMembers, setSelectedGroupMembers] = useState([]);
   
+  const [collapsedCategories, setCollapsedCategories] = useState({
+    personal: false,
+    group: false,
+    project: false,
+    task: false,
+  });
+  const [groupNameError, setGroupNameError] = useState(false);
+
+  const toggleCategory = (cat) => {
+    setCollapsedCategories((prev) => ({
+      ...prev,
+      [cat]: !prev[cat],
+    }));
+  };
+  
   // Consumer-focused notification states
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [visualAlerts, setVisualAlerts] = useState(true);
@@ -284,7 +299,10 @@ export default function Messenger({
 
   // Create group chat
   const handleCreateGroupChat = () => {
-    if (!newGroupName.trim()) return;
+    if (!newGroupName.trim()) {
+      setGroupNameError(true);
+      return;
+    }
     const roomId = `group-chat-${Date.now()}`;
     const newRoom = {
       id: roomId,
@@ -306,6 +324,25 @@ export default function Messenger({
     setNewGroupName("");
     setSelectedGroupMembers([]);
     setIsNewGroupModalOpen(false);
+    setGroupNameError(false);
+  };
+
+  const handleLeaveChat = (roomId) => {
+    if (!window.confirm("Вы действительно хотите выйти из этого чата?")) return;
+
+    setChats((prev) =>
+      prev.map((r) => {
+        if (r.id !== roomId) return r;
+        return {
+          ...r,
+          members: r.members.filter((m) => m !== currentUserId),
+        };
+      })
+    );
+
+    // Switch active room to another available room
+    const nextRoom = accessibleRooms.find((r) => r.id !== roomId);
+    setActiveRoomId(nextRoom ? nextRoom.id : null);
   };
 
   // Dispatch interactive notification event
@@ -366,71 +403,123 @@ export default function Messenger({
         {/* 📋 Sidebar Folder Ordering: Personal -> Groups -> Projects -> Tasks */}
         <div className="sidebar-channels-scroll">
           {/* Folder 1: Personal Dialogues */}
-          <div className="channel-category-block">
-            <h4 className="category-title">👤 Личные диалоги</h4>
-            <div className="category-rooms-list">
-              {accessibleRooms.filter((r) => r.type === "personal").map((room) => (
-                <button
-                  key={room.id}
-                  className={`room-item-link ${activeRoomId === room.id ? "active" : ""}`}
-                  onClick={() => setActiveRoomId(room.id)}
-                >
-                  <span className="room-icon-tag">👤</span>
-                  <span className="room-name-text">{room.name.replace("👤 ", "")}</span>
-                </button>
-              ))}
-            </div>
+          <div className="channel-category-block" style={{ marginBottom: "16px" }}>
+            <h4 
+              className="category-title" 
+              onClick={() => toggleCategory("personal")} 
+              style={{ cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "space-between", userSelect: "none" }}
+            >
+              <span>👤 Личные диалоги</span>
+              <span style={{ fontSize: "10px", opacity: 0.7 }}>{collapsedCategories.personal ? "▶" : "▼"}</span>
+            </h4>
+            {!collapsedCategories.personal && (
+              <div className="category-rooms-list" style={{ marginTop: "6px" }}>
+                {accessibleRooms.filter((r) => r.type === "personal").map((room) => (
+                  <button
+                    key={room.id}
+                    className={`room-item-link ${activeRoomId === room.id ? "active" : ""}`}
+                    onClick={() => setActiveRoomId(room.id)}
+                  >
+                    <span className="room-icon-tag">👤</span>
+                    <span className="room-name-text">{room.name.replace("👤 ", "")}</span>
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Folder 2: Group Chats */}
-          <div className="channel-category-block">
-            <h4 className="category-title">👥 Групповые чаты</h4>
-            <div className="category-rooms-list">
-              {accessibleRooms.filter((r) => r.type === "group").map((room) => (
-                <button
-                  key={room.id}
-                  className={`room-item-link ${activeRoomId === room.id ? "active" : ""}`}
-                  onClick={() => setActiveRoomId(room.id)}
-                >
-                  <span className="room-icon-tag">👥</span>
-                  <span className="room-name-text">{room.name.replace("👥 ", "")}</span>
-                </button>
-              ))}
-            </div>
+          <div className="channel-category-block" style={{ marginBottom: "16px" }}>
+            <h4 
+              className="category-title" 
+              onClick={() => toggleCategory("group")} 
+              style={{ cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "space-between", userSelect: "none" }}
+            >
+              <span>👥 Групповые чаты</span>
+              <span style={{ fontSize: "10px", opacity: 0.7 }}>{collapsedCategories.group ? "▶" : "▼"}</span>
+            </h4>
+            {!collapsedCategories.group && (
+              <div className="category-rooms-list" style={{ marginTop: "6px" }}>
+                {accessibleRooms.filter((r) => r.type === "group").map((room) => (
+                  <button
+                    key={room.id}
+                    className={`room-item-link ${activeRoomId === room.id ? "active" : ""}`}
+                    onClick={() => setActiveRoomId(room.id)}
+                  >
+                    <span className="room-icon-tag">👥</span>
+                    <span className="room-name-text">{room.name.replace("👥 ", "")}</span>
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Folder 3: Project Auto-Chats */}
-          <div className="channel-category-block">
-            <h4 className="category-title">📁 Проекты (Авто)</h4>
-            <div className="category-rooms-list">
-              {accessibleRooms.filter((r) => r.type === "project").map((room) => (
-                <button
-                  key={room.id}
-                  className={`room-item-link ${activeRoomId === room.id ? "active" : ""}`}
-                  onClick={() => setActiveRoomId(room.id)}
-                >
-                  <span className="room-icon-tag">📂</span>
-                  <span className="room-name-text">{room.name.replace("📂 Проект: ", "")}</span>
-                </button>
-              ))}
-            </div>
+          <div className="channel-category-block" style={{ marginBottom: "16px" }}>
+            <h4 
+              className="category-title" 
+              onClick={() => toggleCategory("project")} 
+              style={{ cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "space-between", userSelect: "none" }}
+            >
+              <span>📁 Проекты (Авто)</span>
+              <span style={{ fontSize: "10px", opacity: 0.7 }}>{collapsedCategories.project ? "▶" : "▼"}</span>
+            </h4>
+            {!collapsedCategories.project && (
+              <div className="category-rooms-list" style={{ marginTop: "6px" }}>
+                {accessibleRooms.filter((r) => r.type === "project").map((room) => (
+                  <button
+                    key={room.id}
+                    className={`room-item-link ${activeRoomId === room.id ? "active" : ""}`}
+                    onClick={() => setActiveRoomId(room.id)}
+                  >
+                    <span className="room-icon-tag">📂</span>
+                    <span className="room-name-text">{room.name.replace("📂 Проект: ", "")}</span>
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
 
-          {/* Folder 4: Assigned Tasks Auto-Chats */}
-          <div className="channel-category-block">
-            <h4 className="category-title">📅 Задачи (Авто)</h4>
-            <div className="category-rooms-list">
-              {accessibleRooms.filter((r) => r.type === "task").map((room) => (
-                <button
-                  key={room.id}
-                  className={`room-item-link ${activeRoomId === room.id ? "active" : ""}`}
-                  onClick={() => setActiveRoomId(room.id)}
-                >
-                  <span className="room-icon-tag">📅</span>
-                  <span className="room-name-text">{room.taskName}</span>
-                </button>
-              ))}
-            </div>
+          {/* Folder 4: Assigned Tasks Auto-Chats (Grouped by Project) */}
+          <div className="channel-category-block" style={{ marginBottom: "16px" }}>
+            <h4 
+              className="category-title" 
+              onClick={() => toggleCategory("task")} 
+              style={{ cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "space-between", userSelect: "none" }}
+            >
+              <span>📅 Задачи (Авто)</span>
+              <span style={{ fontSize: "10px", opacity: 0.7 }}>{collapsedCategories.task ? "▶" : "▼"}</span>
+            </h4>
+            {!collapsedCategories.task && (
+              <div className="category-rooms-list" style={{ marginTop: "6px", display: "flex", flexDirection: "column", gap: "8px" }}>
+                {userProjects.map((project) => {
+                  const projectTaskRooms = accessibleRooms.filter(
+                    (r) => r.type === "task" && r.projectId === project.id
+                  );
+                  if (projectTaskRooms.length === 0) return null;
+                  return (
+                    <div key={project.id} className="project-task-group" style={{ marginBottom: "4px" }}>
+                      <div className="project-task-group-title" style={{ fontSize: "11px", fontWeight: "700", color: "var(--accent-color)", padding: "2px 8px", textTransform: "uppercase", letterSpacing: "0.5px", opacity: 0.8, marginBottom: "4px" }}>
+                        📁 {project.name}
+                      </div>
+                      <div style={{ display: "flex", flexDirection: "column", gap: "2px", paddingLeft: "6px" }}>
+                        {projectTaskRooms.map((room) => (
+                          <button
+                            key={room.id}
+                            className={`room-item-link ${activeRoomId === room.id ? "active" : ""}`}
+                            onClick={() => setActiveRoomId(room.id)}
+                            style={{ paddingLeft: "8px" }}
+                          >
+                            <span className="room-icon-tag">📅</span>
+                            <span className="room-name-text" style={{ fontSize: "12.5px" }}>{room.taskName}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         </div>
       </aside>
@@ -442,11 +531,30 @@ export default function Messenger({
             <header className="chat-header">
               <div className="room-header-info">
                 <h3>{activeRoom.name}</h3>
-                <span className="room-meta-tag">тип: {activeRoom.type}</span>
+                <div style={{ display: "flex", gap: "6px", alignItems: "center", marginTop: "4px" }}>
+                  <span className="room-meta-tag">тип: {activeRoom.type}</span>
+                  {activeRoom.type === "task" && (() => {
+                    const proj = projects.find((p) => p.id === activeRoom.projectId);
+                    return proj ? (
+                      <span className="room-meta-tag" style={{ background: "rgba(139, 92, 246, 0.15)", color: "#8b5cf6", fontWeight: "600" }}>
+                        📂 Проект: {proj.name}
+                      </span>
+                    ) : null;
+                  })()}
+                </div>
               </div>
 
               {/* Context Transition Buttons */}
-              <div className="chat-context-actions">
+              <div className="chat-context-actions" style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                {(activeRoom.type === "personal" || activeRoom.type === "group") && (
+                  <button
+                    className="btn danger small"
+                    onClick={() => handleLeaveChat(activeRoom.id)}
+                    style={{ padding: "6px 12px", fontSize: "12px", display: "inline-flex", alignItems: "center", gap: "4px" }}
+                  >
+                    🚪 Выйти из чата
+                  </button>
+                )}
                 {activeRoom.type === "project" && (
                   <button
                     className="btn primary small"
@@ -735,13 +843,26 @@ export default function Messenger({
               </button>
             </div>
             <div className="modal-body group-modal-body">
-              <input
+               <input
                 type="text"
                 className="input-field"
                 placeholder="Название группового чата"
                 value={newGroupName}
-                onChange={(e) => setNewGroupName(e.target.value)}
+                onChange={(e) => {
+                  setNewGroupName(e.target.value);
+                  setGroupNameError(false);
+                }}
+                style={{
+                  borderColor: groupNameError ? "#ef4444" : "var(--border-color)",
+                  boxShadow: groupNameError ? "0 0 0 2px rgba(239, 68, 68, 0.2)" : "none",
+                  transition: "all 0.2s"
+                }}
               />
+              {groupNameError && (
+                <span style={{ color: "#ef4444", fontSize: "12px", marginTop: "4px", display: "block" }}>
+                  ⚠️ Пожалуйста, укажите название группы
+                </span>
+              )}
               <p style={{ marginTop: 16, marginBottom: 8, fontWeight: 600 }}>Выберите участников:</p>
               <div className="group-members-checklist">
                 {activeTeammates.map((u) => (
@@ -765,7 +886,6 @@ export default function Messenger({
                 className="btn primary full-width"
                 style={{ marginTop: 20 }}
                 onClick={handleCreateGroupChat}
-                disabled={!newGroupName.trim()}
               >
                 Создать группу
               </button>

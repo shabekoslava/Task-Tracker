@@ -4,7 +4,7 @@
   display: flex;
   flex-direction: column;
   height: 100%;
-  overflow: hidden; /* Hide overflow to let scroll handle it inside */
+  overflow-y: auto;
   background: var(--bg-app);
 }
 
@@ -139,7 +139,7 @@
   align-items: stretch; /* Stretches columns to 100% height to trigger vertical scrollbar inside columns */
   gap: 16px;
   overflow-x: auto;
-  overflow-y: hidden;
+  overflow-y: auto;
   padding: 16px 16px 20px 16px; /* Gives 16px top, left, right breathing room so scaling borders never clip! */
   margin-top: -12px; /* Offsets top padding to maintain pristine spacing from header */
   flex: 1;

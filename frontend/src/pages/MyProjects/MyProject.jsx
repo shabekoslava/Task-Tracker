@@ -8,6 +8,7 @@ export default function MyProjects({
   onInviteUser,
   onChangeRole,
   onLeaveProject,
+  onDeleteProject,
   currentUserId,
   openProject,
   onMoveProjectUp,
@@ -248,7 +249,7 @@ export default function MyProjects({
                       )}
                     </div>
 
-                    <div className="project-card-footer">
+                    <div className="project-card-footer" style={{ display: "flex", gap: "12px", justifyContent: "flex-end" }}>
                       <button
                         className="btn danger"
                         onClick={() => {
@@ -259,6 +260,32 @@ export default function MyProjects({
                       >
                         Выйти из проекта
                       </button>
+                      {isAdmin && (
+                        <button
+                          className="btn danger"
+                          onClick={() => {
+                            const password = window.prompt("Для удаления проекта введите ваш пароль от аккаунта:");
+                            if (password === null) return;
+                            
+                            const authUsers = JSON.parse(localStorage.getItem("auth_users") || "[]");
+                            const userRecord = authUsers.find(u => u.id === currentUserId);
+                            if (userRecord && password === userRecord.password) {
+                              if (window.confirm(`Вы уверены, что хотите полностью удалить проект "${project.name}"? Это действие со всеми его задачами абсолютно необратимо!`)) {
+                                onDeleteProject(project.id);
+                              }
+                            } else {
+                              alert("Неверный пароль. Удаление отменено.");
+                            }
+                          }}
+                          style={{
+                            background: "rgba(239, 68, 68, 0.15)",
+                            border: "1px solid #ef4444",
+                            color: "#ef4444"
+                          }}
+                        >
+                          🗑️ Удалить проект
+                        </button>
+                      )}
                     </div>
                   </div>
                 )}

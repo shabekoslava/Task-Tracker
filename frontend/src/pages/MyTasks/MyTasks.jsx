@@ -1,14 +1,19 @@
 import "./MyTasks.css";
 
-export default function MyTasks({ projects, currentUserId, onToggleTaskComplete, onOpenTask }) {
+export default function MyTasks({
+  projects,
+  currentUserId,
+  onToggleTaskComplete,
+  onOpenTask,
+}) {
   // Extract and enrich tasks assigned to the user from all active projects
   const assignedTasks = projects.flatMap((project) =>
     Object.values(project.tasks || {})
       .filter((task) => task.assignedTo === currentUserId)
-      .map((task) => ({ 
-        ...task, 
-        projectName: project.name, 
-        projectId: project.id 
+      .map((task) => ({
+        ...task,
+        projectName: project.name,
+        projectId: project.id,
       })),
   );
 
@@ -112,28 +117,47 @@ export default function MyTasks({ projects, currentUserId, onToggleTaskComplete,
       <div className="tasks-summary">
         <div>
           <h2>Мои задачи</h2>
-          <p>Задачи, назначенные вам во всех проектах, отсортированные по Agile-приоритетам.</p>
+          <p>Задачи, назначенные вам.</p>
         </div>
         <div style={{ display: "flex", gap: 12 }}>
-          <div className="task-count urgent-badge">Активных: {totalActiveTasks}</div>
+          <div className="task-count urgent-badge">
+            Активных: {totalActiveTasks}
+          </div>
           <div className="task-count">Всего: {assignedTasks.length}</div>
         </div>
       </div>
 
       {assignedTasks.length === 0 ? (
         <div className="task-card empty-state">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="empty-state-icon">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            className="empty-state-icon"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"
+            />
           </svg>
           <h3>Назначенных задач пока нет</h3>
-          <p>Когда в ваших проектах появятся задачи, в которых вы указаны исполнителем, они мгновенно отобразятся здесь с группировкой по срокам.</p>
+          <p>
+            Когда в ваших проектах появятся задачи, в которых вы указаны
+            исполнителем, они мгновенно отобразятся здесь с группировкой по
+            срокам.
+          </p>
         </div>
       ) : (
         <div className="tasks-groups-container">
           {groups.map(
             (group) =>
               group.tasks.length > 0 && (
-                <section className={`tasks-group-section ${group.className}`} key={group.id}>
+                <section
+                  className={`tasks-group-section ${group.className}`}
+                  key={group.id}
+                >
                   <div className="group-header">
                     <span className="group-icon">{group.icon}</span>
                     <h3>{group.title}</h3>
@@ -142,43 +166,73 @@ export default function MyTasks({ projects, currentUserId, onToggleTaskComplete,
 
                   <div className="task-grid">
                     {group.tasks.map((task) => (
-                      <article 
-                        className={`task-card clickable ${task.completed ? "completed" : ""}`} 
+                      <article
+                        className={`task-card clickable ${task.completed ? "completed" : ""}`}
                         key={task.id}
-                        onClick={() => onOpenTask && onOpenTask(task.projectId, task.id)}
-                        style={{ cursor: 'pointer', transition: 'transform 0.2s, box-shadow 0.2s' }}
+                        onClick={() =>
+                          onOpenTask && onOpenTask(task.projectId, task.id)
+                        }
+                        style={{
+                          cursor: "pointer",
+                          transition: "transform 0.2s, box-shadow 0.2s",
+                        }}
                       >
                         <div className="task-card-header">
-                          <span className="project-badge">{task.projectName}</span>
-                          {task.priority === "Срочно" || task.priority === "Критичный" || task.priority === "Высокий" ? (
-                            <span className="priority-badge priority-critical">🔥 Срочно</span>
-                          ) : (
-                            <span className="priority-badge priority-low">Не срочно</span>
+                          <span className="project-badge">
+                            {task.projectName}
+                          </span>
+                          {(task.priority === "Срочно" ||
+                            task.priority === "Критичный" ||
+                            task.priority === "Высокий") && (
+                            <span className="priority-badge priority-critical">
+                              🔥 Срочно
+                            </span>
                           )}
                         </div>
 
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '10px', marginBottom: '8px' }}>
+                        <div
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "8px",
+                            marginTop: "10px",
+                            marginBottom: "8px",
+                          }}
+                        >
                           <input
                             type="checkbox"
                             checked={task.completed}
                             onChange={(e) => {
                               e.stopPropagation();
-                              onToggleTaskComplete && onToggleTaskComplete(task.projectId, task.id);
+                              onToggleTaskComplete &&
+                                onToggleTaskComplete(task.projectId, task.id);
                             }}
                             onClick={(e) => e.stopPropagation()}
                             style={{
-                              width: '16px',
-                              height: '16px',
-                              cursor: 'pointer',
-                              accentColor: 'var(--accent-color)',
+                              width: "16px",
+                              height: "16px",
+                              cursor: "pointer",
+                              accentColor: "var(--accent-color)",
                             }}
                           />
-                          <h3 style={{ margin: 0, textDecoration: task.completed ? 'line-through' : 'none', opacity: task.completed ? 0.6 : 1, fontSize: '15px', fontWeight: '600' }}>
+                          <h3
+                            style={{
+                              margin: 0,
+                              textDecoration: task.completed
+                                ? "line-through"
+                                : "none",
+                              opacity: task.completed ? 0.6 : 1,
+                              fontSize: "15px",
+                              fontWeight: "600",
+                            }}
+                          >
                             {task.title}
                           </h3>
                         </div>
-                        
-                        {task.description && <p className="task-description">{task.description}</p>}
+
+                        {task.description && (
+                          <p className="task-description">{task.description}</p>
+                        )}
 
                         <div className="task-tags-container">
                           {task.tags?.length > 0 && (
@@ -195,11 +249,15 @@ export default function MyTasks({ projects, currentUserId, onToggleTaskComplete,
                         <div className="task-footer">
                           <div className="task-meta">
                             {task.deadline && (
-                              <span className={`due-date-meta ${group.id === "overdue" ? "text-danger" : ""}`}>
+                              <span
+                                className={`due-date-meta ${group.id === "overdue" ? "text-danger" : ""}`}
+                              >
                                 📅 До: {task.deadline}
                               </span>
                             )}
-                            {task.estimate && <span>⏱ Оценка: {task.estimate}</span>}
+                            {task.estimate && (
+                              <span>⏱ Оценка: {task.estimate}</span>
+                            )}
                           </div>
                           <span className="comments-count-badge">
                             💬 {task.comments?.length || 0}
@@ -209,7 +267,7 @@ export default function MyTasks({ projects, currentUserId, onToggleTaskComplete,
                     ))}
                   </div>
                 </section>
-              )
+              ),
           )}
         </div>
       )}
