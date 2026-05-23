@@ -2,7 +2,7 @@ import "./MyProfile.css";
 import { useState, useEffect } from "react";
 import Card from "../../components/Card/Card";
 
-export default function MyProfile({ userId, onLogout }) {
+export default function MyProfile({ userId, onLogout, onProfileUpdate }) {
   const [displayName, setDisplayName] = useState("");
   const [editingName, setEditingName] = useState("");
 
@@ -54,14 +54,35 @@ export default function MyProfile({ userId, onLogout }) {
   }, [userId]);
 
   function saveName() {
-    setDisplayName(editingName);
+    const trimmed = editingName.trim();
+    if (!trimmed) {
+      alert("Имя пользователя не может быть пустым");
+      return;
+    }
+
+    setDisplayName(trimmed);
     
     // Sync local storage session so sidebar changes instantly
     const session = localStorage.getItem("active_user_session");
+    let updatedSession = null;
     if (session) {
-      const parsed = JSON.parse(session);
-      parsed.name = editingName;
-      localStorage.setItem("active_user_session", JSON.stringify(parsed));
+      updatedSession = JSON.parse(session);
+      updatedSession.name = trimmed;
+      localStorage.setItem("active_user_session", JSON.stringify(updatedSession));
+    }
+
+    // Sync inside auth_users database in localStorage
+    const usersJson = localStorage.getItem("auth_users");
+    if (usersJson) {
+      const users = JSON.parse(usersJson);
+      const updatedUsers = users.map((u) => 
+        u.id === userId ? { ...u, name: trimmed } : u
+      );
+      localStorage.setItem("auth_users", JSON.stringify(updatedUsers));
+    }
+
+    if (onProfileUpdate && updatedSession) {
+      onProfileUpdate(updatedSession);
     }
 
     // Sync to Python FastAPI Server
@@ -70,7 +91,7 @@ export default function MyProfile({ userId, onLogout }) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         userId,
-        displayName: editingName,
+        displayName: trimmed,
         email: editingEmail
       })
     })
@@ -86,14 +107,53 @@ export default function MyProfile({ userId, onLogout }) {
   }
 
   function saveEmail() {
-    setEmail(editingEmail);
+    const trimmed = editingEmail.trim();
+    if (!trimmed) {
+      alert("Пожалуйста, введите адрес электронной почты");
+      return;
+    }
+
+    const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+    if (!emailRegex.test(trimmed)) {
+      alert("Пожалуйста, введите корректный адрес электронной почты");
+      return;
+    }
+
+    // Check if email already registered by ANOTHER user
+    const usersJson = localStorage.getItem("auth_users");
+    if (usersJson) {
+      const users = JSON.parse(usersJson);
+      const isAlreadyTaken = users.some(
+        (u) => u.id !== userId && u.email.toLowerCase() === trimmed.toLowerCase()
+      );
+      if (isAlreadyTaken) {
+        alert("Этот Email уже занят другим пользователем");
+        return;
+      }
+    }
+
+    setEmail(trimmed);
 
     // Sync local storage session so sidebar changes instantly
     const session = localStorage.getItem("active_user_session");
+    let updatedSession = null;
     if (session) {
-      const parsed = JSON.parse(session);
-      parsed.email = editingEmail;
-      localStorage.setItem("active_user_session", JSON.stringify(parsed));
+      updatedSession = JSON.parse(session);
+      updatedSession.email = trimmed;
+      localStorage.setItem("active_user_session", JSON.stringify(updatedSession));
+    }
+
+    // Sync inside auth_users database in localStorage
+    if (usersJson) {
+      const users = JSON.parse(usersJson);
+      const updatedUsers = users.map((u) => 
+        u.id === userId ? { ...u, email: trimmed } : u
+      );
+      localStorage.setItem("auth_users", JSON.stringify(updatedUsers));
+    }
+
+    if (onProfileUpdate && updatedSession) {
+      onProfileUpdate(updatedSession);
     }
 
     // Sync to Python FastAPI Server
@@ -102,8 +162,8 @@ export default function MyProfile({ userId, onLogout }) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         userId,
-        displayName: editingName,
-        email: editingEmail
+        displayName: displayName,
+        email: trimmed
       })
     })
     .then((res) => res.json())

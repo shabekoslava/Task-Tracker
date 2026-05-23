@@ -1,6 +1,6 @@
 import "./MyTasks.css";
 
-export default function MyTasks({ projects, currentUserId }) {
+export default function MyTasks({ projects, currentUserId, onToggleTaskComplete, onOpenTask }) {
   // Extract and enrich tasks assigned to the user from all active projects
   const assignedTasks = projects.flatMap((project) =>
     Object.values(project.tasks || {})
@@ -142,17 +142,41 @@ export default function MyTasks({ projects, currentUserId }) {
 
                   <div className="task-grid">
                     {group.tasks.map((task) => (
-                      <article className={`task-card ${task.completed ? "completed" : ""}`} key={task.id}>
+                      <article 
+                        className={`task-card clickable ${task.completed ? "completed" : ""}`} 
+                        key={task.id}
+                        onClick={() => onOpenTask && onOpenTask(task.projectId, task.id)}
+                        style={{ cursor: 'pointer', transition: 'transform 0.2s, box-shadow 0.2s' }}
+                      >
                         <div className="task-card-header">
                           <span className="project-badge">{task.projectName}</span>
-                          {task.priority && (
-                            <span className={`priority-badge priority-${task.priority}`}>
-                              {task.priority}
-                            </span>
+                          {task.priority === "Срочно" || task.priority === "Критичный" || task.priority === "Высокий" ? (
+                            <span className="priority-badge priority-critical">🔥 Срочно</span>
+                          ) : (
+                            <span className="priority-badge priority-low">Не срочно</span>
                           )}
                         </div>
 
-                        <h3>{task.title}</h3>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '10px', marginBottom: '8px' }}>
+                          <input
+                            type="checkbox"
+                            checked={task.completed}
+                            onChange={(e) => {
+                              e.stopPropagation();
+                              onToggleTaskComplete && onToggleTaskComplete(task.projectId, task.id);
+                            }}
+                            onClick={(e) => e.stopPropagation()}
+                            style={{
+                              width: '16px',
+                              height: '16px',
+                              cursor: 'pointer',
+                              accentColor: 'var(--accent-color)',
+                            }}
+                          />
+                          <h3 style={{ margin: 0, textDecoration: task.completed ? 'line-through' : 'none', opacity: task.completed ? 0.6 : 1, fontSize: '15px', fontWeight: '600' }}>
+                            {task.title}
+                          </h3>
+                        </div>
                         
                         {task.description && <p className="task-description">{task.description}</p>}
 

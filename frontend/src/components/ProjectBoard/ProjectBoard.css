@@ -52,7 +52,7 @@
   font-weight: 600;
   border: 2px solid var(--bg-app);
   margin-left: -8px;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
   position: relative;
   z-index: 1;
 }
@@ -81,14 +81,17 @@
   font-size: 11px;
   white-space: nowrap;
   pointer-events: none;
-  transition: opacity 0.2s ease, transform 0.2s ease, visibility 0.2s;
+  transition:
+    opacity 0.2s ease,
+    transform 0.2s ease,
+    visibility 0.2s;
   z-index: 100;
   font-weight: 500;
   margin-bottom: 6px;
 }
 
 .avatar-tooltip::after {
-  content: '';
+  content: "";
   position: absolute;
   top: 100%;
   left: 50%;
@@ -146,7 +149,7 @@
   height: 8px;
 }
 .board-scroll::-webkit-scrollbar-track {
-  background: rgba(0,0,0,0.05);
+  background: rgba(0, 0, 0, 0.05);
   border-radius: 4px;
 }
 .board-scroll::-webkit-scrollbar-thumb {
@@ -180,11 +183,9 @@
   z-index: 5;
 }
 
-
-
 .column-header {
   padding: 16px;
-  border-bottom: 1px solid rgba(0,0,0,0.05);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
 }
 
 .column-title-clickable {
@@ -263,7 +264,10 @@
   padding: 14px;
   box-shadow: var(--kanban-shadow);
   cursor: pointer;
-  transition: transform 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
+  transition:
+    transform 0.2s ease,
+    background 0.2s ease,
+    box-shadow 0.2s ease;
   border: 1px solid transparent;
   display: flex;
   flex-direction: column;
@@ -275,7 +279,7 @@
   transform: translateY(-2px);
   background: var(--bg-card-hover);
   border-color: var(--border-color);
-  box-shadow: 0 6px 10px -2px rgba(0,0,0,0.2);
+  box-shadow: 0 6px 10px -2px rgba(0, 0, 0, 0.2);
 }
 
 .task-card.is-dragging {
@@ -374,7 +378,7 @@
 }
 
 .meta-icon.due-date {
-  background: rgba(0,0,0,0.05);
+  background: rgba(0, 0, 0, 0.05);
   padding: 2px 6px;
   border-radius: 4px;
 }
@@ -391,7 +395,9 @@
   cursor: pointer;
   font-size: 14px;
   font-weight: 500;
-  transition: background 0.2s ease, color 0.2s ease;
+  transition:
+    background 0.2s ease,
+    color 0.2s ease;
   margin-top: auto;
 }
 
@@ -433,7 +439,9 @@
   font-size: 14px;
   font-weight: 500;
   cursor: pointer;
-  transition: opacity 0.2s ease, background 0.2s ease;
+  transition:
+    opacity 0.2s ease,
+    background 0.2s ease;
 }
 
 .btn:hover {
@@ -489,11 +497,13 @@
   background: #059669;
 }
 
-
 /* Modal Overlay */
 .modal-overlay {
   position: fixed;
-  top: 0; left: 0; right: 0; bottom: 0;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
   background: var(--modal-overlay);
   backdrop-filter: blur(2px);
   z-index: 1000;
@@ -505,8 +515,12 @@
 }
 
 @keyframes fadeIn {
-  from { opacity: 0; }
-  to { opacity: 1; }
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 .task-modal {
@@ -515,7 +529,9 @@
   max-width: 800px;
   max-height: 90vh;
   border-radius: 12px;
-  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.4), 0 10px 10px -5px rgba(0, 0, 0, 0.2);
+  box-shadow:
+    0 20px 25px -5px rgba(0, 0, 0, 0.4),
+    0 10px 10px -5px rgba(0, 0, 0, 0.2);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -524,8 +540,14 @@
 }
 
 @keyframes slideUp {
-  from { transform: translateY(20px); opacity: 0; }
-  to { transform: translateY(0); opacity: 1; }
+  from {
+    transform: translateY(20px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
 }
 
 .modal-header {
@@ -560,7 +582,6 @@
   background: var(--bg-surface);
   box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
 }
-
 
 .close-btn {
   background: none;
@@ -597,8 +618,105 @@
 .modal-sidebar {
   flex: 1;
   padding: 24px;
-  background: var(--bg-surface);
-  min-width: 250px;
+}
+
+.sidebar-property-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.sidebar-property-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--nav-text-inactive);
+  font-size: 13px;
+  font-weight: 500;
+  width: 105px;
+  flex-shrink: 0;
+  user-select: none;
+}
+
+.sidebar-property-value {
+  flex: 1;
+}
+
+.sidebar-property-value select,
+.sidebar-property-value input {
+  background: rgba(255, 255, 255, 0.03) !important;
+  border: 1px solid var(--border-color) !important;
+  border-radius: 6px !important;
+  color: var(--text-primary) !important;
+  padding: 6px 10px !important;
+  font-size: 13px !important;
+  width: 100% !important;
+  box-sizing: border-box !important;
+  outline: none !important;
+  transition: all 0.2s !important;
+  color-scheme: dark;
+}
+
+.sidebar-property-value select:focus,
+.sidebar-property-value input:focus {
+  border-color: var(--accent-color) !important;
+  background: var(--bg-card) !important;
+}
+
+/* Beautiful inline numeric estimate selectors */
+.estimate-input-container {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 0 8px;
+  height: 32px;
+  box-sizing: border-box;
+  transition: border-color 0.2s, background 0.2s;
+}
+
+.estimate-input-container:focus-within {
+  border-color: var(--accent-color);
+  background: var(--bg-card);
+}
+
+.estimate-field-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: 1;
+}
+
+.estimate-field-wrapper input {
+  width: 100% !important;
+  background: transparent !important;
+  border: none !important;
+  color: var(--text-primary) !important;
+  padding: 0 !important;
+  font-size: 13px !important;
+  text-align: center !important;
+  outline: none !important;
+  height: 100% !important;
+}
+
+/* Hide native number spinner arrows */
+.estimate-field-wrapper input::-webkit-outer-spin-button,
+.estimate-field-wrapper input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.estimate-field-wrapper input[type=number] {
+  -moz-appearance: textfield;
+}
+
+.estimate-field-label {
+  font-size: 12px;
+  color: var(--nav-text-inactive);
+  user-select: none;
 }
 
 .field-group {
@@ -723,3 +841,16 @@
   }
 }
 
+.estimate-hours-input {
+  padding-right: 28px !important;
+}
+
+.estimate-hours-input::-webkit-outer-spin-button,
+.estimate-hours-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.estimate-hours-input {
+  -moz-appearance: textfield;
+}

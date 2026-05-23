@@ -15,6 +15,7 @@ export default function App() {
   const [currentTab, setCurrentTab] = useState("Мои задачи");
   const [isDark, setIsDark] = useState(true);
   const [initialProjectTab, setInitialProjectTab] = useState("board"); // "board" | "settings"
+  const [initialActiveTaskId, setInitialActiveTaskId] = useState(null);
 
 
   // 👤 Auth State: loaded from localStorage session
@@ -346,6 +347,7 @@ export default function App() {
     };
 
     setProjects((prev) => [...prev, nextProject]);
+    setInitialProjectTab("settings");
     setCurrentTab(`project-${nextProject.id}`);
     return true;
   };
@@ -484,6 +486,29 @@ export default function App() {
           columns: project.columns.filter((column) => column.id !== columnId),
         };
       }),
+    );
+  };
+
+  const moveColumn = (projectId, columnId, direction) => {
+    setProjects((prev) =>
+      prev.map((project) => {
+        if (project.id !== projectId) return project;
+        const columns = [...project.columns];
+        const index = columns.findIndex((col) => col.id === columnId);
+        if (index === -1) return project;
+
+        if (direction === "left" && index > 0) {
+          const temp = columns[index];
+          columns[index] = columns[index - 1];
+          columns[index - 1] = temp;
+        } else if (direction === "right" && index < columns.length - 1) {
+          const temp = columns[index];
+          columns[index] = columns[index + 1];
+          columns[index + 1] = temp;
+        }
+
+        return { ...project, columns };
+      })
     );
   };
 
@@ -694,6 +719,7 @@ export default function App() {
           onAddColumn={addColumn}
           onRenameColumn={renameColumn}
           onDeleteColumn={deleteColumn}
+          onMoveColumn={moveColumn}
           onAddTask={addTask}
           onEditTask={editTask}
           onDeleteTask={deleteTask}
@@ -708,6 +734,8 @@ export default function App() {
           initialViewMode={initialProjectTab}
           onAddProjectTag={addProjectTag}
           onRemoveProjectTag={removeProjectTag}
+          initialActiveTaskId={initialActiveTaskId}
+          onClearInitialActiveTaskId={() => setInitialActiveTaskId(null)}
         />
       );
     }
@@ -729,11 +757,27 @@ export default function App() {
     }
 
     if (currentTab === "Мой профиль") {
-      return <MyProfile userId={currentUserId} onLogout={handleLogout} />;
+      return (
+        <MyProfile
+          userId={currentUserId}
+          onLogout={handleLogout}
+          onProfileUpdate={setCurrentUser}
+        />
+      );
     }
 
     if (currentTab === "Мои задачи") {
-      return <MyTasks projects={projects} currentUserId={currentUserId} />;
+      return (
+        <MyTasks
+          projects={projects}
+          currentUserId={currentUserId}
+          onToggleTaskComplete={toggleTaskComplete}
+          onOpenTask={(projectId, taskId) => {
+            setInitialActiveTaskId(taskId);
+            openProject(projectId);
+          }}
+        />
+      );
     }
 
     if (currentTab === "Мессенджер") {
