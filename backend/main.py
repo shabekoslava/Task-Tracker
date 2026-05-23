@@ -4,6 +4,7 @@ import json
 from typing import Dict, List, Any
 from fastapi import FastAPI, Body, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from db import init_db, get_all_data_from_db, sync_data_to_db
 
 app = FastAPI()
 
@@ -52,22 +53,27 @@ async def websocket_endpoint(websocket: WebSocket):
     except Exception:
         manager.disconnect(websocket)
 
-# 💡 Make DB file path robust and independent of launch cwd
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DB_FILE = os.path.join(BASE_DIR, "backend_db.json")
+@app.on_event("startup")
+def startup_event():
+    try:
+        init_db()
+        print("\n" + "═"*60)
+        print("⚡ [DATABASE INITIALIZED] Connected and synchronized with PostgreSQL!")
+        print("═"*60 + "\n")
+    except Exception as e:
+        print("\n" + "!"*80)
+        print("⚠️  [DATABASE CONNECTION FAILED] СОЕДИНЕНИЕ С POSTGRESQL НЕ УДАЛОСЬ!  ⚠️")
+        print(f"Ошибка: {e}")
+        print("Приложение продолжит работу в режиме ожидания.")
+        print("Пожалуйста, убедитесь, что PostgreSQL запущен, и параметры в backend/db.py верны.")
+        print("Учетные данные по умолчанию: хост=localhost, порт=5432, бд=postgres, пользователь=postgres, пароль=postgres")
+        print("!"*80 + "\n")
 
 def load_db() -> dict:
-    if not os.path.exists(DB_FILE):
-        return {
-            "users": [],
-            "projects": [],
-            "invitations": [],
-            "chats": []
-        }
     try:
-        with open(DB_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
+        return get_all_data_from_db()
+    except Exception as e:
+        print(f"Error loading from PostgreSQL: {e}")
         return {
             "users": [],
             "projects": [],
@@ -76,8 +82,10 @@ def load_db() -> dict:
         }
 
 def save_db(data: dict):
-    with open(DB_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    try:
+        sync_data_to_db(data)
+    except Exception as e:
+        print(f"Error saving to PostgreSQL: {e}")
 
 @app.get("/api/user/profile")
 def get_user_profile(userId: str = None):
