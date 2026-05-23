@@ -15,6 +15,7 @@ export default function Messenger({
   // Modals & Panel States
   const [isNewPersonalModalOpen, setIsNewPersonalModalOpen] = useState(false);
   const [isNewGroupModalOpen, setIsNewGroupModalOpen] = useState(false);
+  const [isNotifModalOpen, setIsNotifModalOpen] = useState(false);
   const [newGroupName, setNewGroupName] = useState("");
   const [selectedGroupMembers, setSelectedGroupMembers] = useState([]);
   
@@ -580,26 +581,113 @@ export default function Messenger({
         </section>
 
         {/* Beautiful Inbox Feed for recent Notifications */}
-        <section className="tech-block notifications-inbox-section" style={{ flex: 1, display: "flex", flexDirection: "column" }}>
-          <h4>📬 Лента уведомлений</h4>
-          <div className="notifications-list-container" style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", gap: 10, paddingRight: 4 }}>
-            {recentNotifications.map((not) => (
-              <div className="notif-inbox-item" key={not.id} style={{ background: "rgba(255, 255, 255, 0.02)", border: "1px solid var(--border-color)", borderRadius: 10, padding: 12, display: "flex", flexDirection: "column", gap: 6 }}>
-                <div className="notif-item-header" style={{ display: "flex", justifyContent: "space-between", fontSize: 11, fontWeight: "bold", color: "#8b5cf6" }}>
-                  <span>🔔 {not.title}</span>
-                  <span style={{ color: "var(--nav-text-inactive)", fontWeight: "normal" }}>
-                    {not.date && `${not.date} `}{not.time}
-                  </span>
+        <section className="tech-block notifications-inbox-section" style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid var(--border-color)", paddingBottom: 8, marginBottom: 8 }}>
+            <h4 style={{ margin: 0, border: "none", padding: 0 }}>📬 Лента уведомлений</h4>
+            <button 
+              className="btn secondary small" 
+              style={{ fontSize: 10, padding: "4px 8px", borderRadius: 6, cursor: "pointer", display: "flex", alignItems: "center", gap: 3 }}
+              onClick={() => setIsNotifModalOpen(true)}
+              title="Открыть во всплывающем окне"
+            >
+              🖥️ Окно
+            </button>
+          </div>
+          <div className="notifications-list-container">
+            {recentNotifications.length === 0 ? (
+              <p style={{ fontSize: 12, color: "var(--nav-text-inactive)", textAlign: "center", margin: "20px 0" }}>Нет новых уведомлений</p>
+            ) : (
+              recentNotifications.map((not) => (
+                <div className="notif-inbox-item" key={not.id}>
+                  <div className="notif-item-header">
+                    <span>🔔 {not.title}</span>
+                    <span className="notif-item-time">
+                      {not.date && `${not.date} `}{not.time}
+                    </span>
+                  </div>
+                  <p className="notif-item-text">{not.text}</p>
                 </div>
-                <p className="notif-item-text" style={{ margin: 0, fontSize: 12.5, color: "var(--text-primary)", lineHeight: 1.4 }}>{not.text}</p>
-              </div>
-            ))}
+              ))
+            )}
           </div>
         </section>
 
       </aside>
 
       {/* 4. Modals */}
+      {isNotifModalOpen && (
+        <div className="modal-overlay" onClick={() => setIsNotifModalOpen(false)}>
+          <div className="modal-window" style={{ maxWidth: 640 }} onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <span style={{ fontSize: 24 }}>🔔</span>
+                <div style={{ textAlign: "left" }}>
+                  <h3 style={{ margin: 0 }}>Центр уведомлений</h3>
+                  <span style={{ fontSize: 11, color: "var(--nav-text-inactive)" }}>
+                    Всего уведомлений: {recentNotifications.length}
+                  </span>
+                </div>
+              </div>
+              <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+                {recentNotifications.length > 0 && (
+                  <button
+                    className="btn danger small"
+                    style={{ fontSize: 11, padding: "6px 12px" }}
+                    onClick={() => {
+                      setRecentNotifications([]);
+                      setIsNotifModalOpen(false);
+                    }}
+                  >
+                    🗑️ Очистить
+                  </button>
+                )}
+                <button className="close-btn" onClick={() => setIsNotifModalOpen(false)}>
+                  ×
+                </button>
+              </div>
+            </div>
+            <div className="modal-body" style={{ maxHeight: "50vh", overflowY: "auto", paddingRight: 6 }}>
+              {recentNotifications.length === 0 ? (
+                <div style={{ textAlign: "center", padding: "40px 20px", color: "var(--nav-text-inactive)" }}>
+                  <span style={{ fontSize: 48, display: "block", marginBottom: 12 }}>📬</span>
+                  <p style={{ margin: 0 }}>У вас нет новых уведомлений.</p>
+                </div>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                  {recentNotifications.map((not) => (
+                    <div
+                      key={not.id}
+                      style={{
+                        background: "rgba(255, 255, 255, 0.02)",
+                        border: "1px solid var(--border-color)",
+                        borderRadius: 12,
+                        padding: 16,
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: 8,
+                        textAlign: "left"
+                      }}
+                      className="notif-modal-item"
+                    >
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                        <span style={{ fontSize: 13, fontWeight: "bold", color: "#8b5cf6" }}>
+                          🔔 {not.title}
+                        </span>
+                        <span style={{ fontSize: 11, color: "var(--nav-text-inactive)" }}>
+                          {not.date} в {not.time}
+                        </span>
+                      </div>
+                      <p style={{ margin: 0, fontSize: 13, color: "var(--text-primary)", lineHeight: 1.5 }}>
+                        {not.text}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
       {isNewPersonalModalOpen && (
         <div className="modal-overlay" onClick={() => setIsNewPersonalModalOpen(false)}>
           <div className="modal-window" onClick={(e) => e.stopPropagation()}>

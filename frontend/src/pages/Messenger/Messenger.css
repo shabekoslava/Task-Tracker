@@ -413,7 +413,10 @@
 .notifications-list-container {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
+  max-height: calc(100vh - 425px);
+  overflow-y: auto;
+  padding-right: 4px;
 }
 
 .notif-inbox-item {
