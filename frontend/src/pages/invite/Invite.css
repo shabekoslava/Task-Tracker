@@ -232,3 +232,60 @@
   border: 1px solid rgba(239, 68, 68, 0.25);
   color: #f87171;
 }
+
+/* --- Premium Scoped Button Styles --- */
+.btn {
+  padding: 8px 16px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+  outline: none;
+}
+
+.btn:active {
+  transform: scale(0.96);
+}
+
+.btn.primary {
+  background-color: var(--accent-color);
+  color: #ffffff;
+}
+
+.btn.primary:hover {
+  background-color: var(--btn-primary-hover);
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.25);
+}
+
+.btn.success {
+  background-color: #10b981;
+  color: #ffffff;
+}
+
+.btn.success:hover {
+  background-color: #059669;
+  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.25);
+}
+
+.btn.danger {
+  background-color: #ef4444;
+  color: #ffffff;
+}
+
+.btn.danger:hover {
+  background-color: #dc2626;
+  box-shadow: 0 4px 12px rgba(239, 68, 68, 0.25);
+}
+
+.btn.small {
+  padding: 6px 12px;
+  font-size: 13px;
+  border-radius: 6px;
+}
+

@@ -16,6 +16,13 @@ export default function Auth({ onLoginSuccess }) {
   const [registerPassword, setRegisterPassword] = useState("");
   const [registerConfirmPassword, setRegisterConfirmPassword] = useState("");
 
+  // 📧 Email verification flow states
+  const [isVerifying, setIsVerifying] = useState(false);
+  const [generatedOtp, setGeneratedOtp] = useState("");
+  const [userOtpInput, setUserOtpInput] = useState("");
+  const [tempUserData, setTempUserData] = useState(null);
+  const [isResending, setIsResending] = useState(false);
+
   // Helper: Get all registered users
   const getRegisteredUsers = () => {
     const usersJson = localStorage.getItem("auth_users");
@@ -82,6 +89,13 @@ export default function Auth({ onLoginSuccess }) {
       return;
     }
 
+    // 💡 Strict email syntax check using regex to prevent fake/malformed emails
+    const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+    if (!emailRegex.test(email)) {
+      setError("Пожалуйста, введите корректный адрес электронной почты");
+      return;
+    }
+
     if (password !== confirm) {
       setError("Пароли не совпадают");
       return;
@@ -92,6 +106,57 @@ export default function Auth({ onLoginSuccess }) {
     // Check if email already registered
     if (users.some((u) => u.email.toLowerCase() === email.toLowerCase())) {
       setError("Пользователь с таким Email уже зарегистрирован");
+      return;
+    }
+
+    // Generate a random 6-digit confirmation code
+    const code = String(Math.floor(100000 + Math.random() * 900000));
+    setGeneratedOtp(code);
+    setTempUserData({ name, email, password });
+
+    // Mock API call to display code in FastAPI terminal console
+    fetch("/api/auth/send-code", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, code, name }),
+    })
+      .then((res) => {
+        if (!res.ok) throw new Error("Бэкенд офлайн");
+        return res.json();
+      })
+      .then(() => {
+        setIsVerifying(true);
+        setUserOtpInput("");
+        alert(`На вашу почту ${email} был отправлен код подтверждения! Проверьте консоль бэкенда.`);
+      })
+      .catch((err) => {
+        console.error(err);
+        // Fallback for offline mode so developers/students can still test without a running server
+        setIsVerifying(true);
+        setUserOtpInput("");
+        alert(`[Offline Mode] Код подтверждения сгенерирован: ${code} (Бэкенд недоступен, введите его для проверки)`);
+      });
+  };
+
+  const handleVerifyOtpSubmit = (e) => {
+    e.preventDefault();
+    setError("");
+
+    if (userOtpInput !== generatedOtp) {
+      setError("Неверный код подтверждения. Пожалуйста, проверьте код из консоли бэкенда.");
+      return;
+    }
+
+    const name = tempUserData.name;
+    const email = tempUserData.email;
+    const password = tempUserData.password;
+
+    const users = getRegisteredUsers();
+
+    // Check if email already registered (double check)
+    if (users.some((u) => u.email.toLowerCase() === email.toLowerCase())) {
+      setError("Пользователь с таким Email уже зарегистрирован");
+      setIsVerifying(false);
       return;
     }
 
@@ -124,9 +189,46 @@ export default function Auth({ onLoginSuccess }) {
       email: newUser.email
     };
     localStorage.setItem("active_user_session", JSON.stringify(sessionData));
-    
+
     alert(`Регистрация успешна! Ваш уникальный ID: ${generatedId}`);
     onLoginSuccess(sessionData);
+
+    // Reset states
+    setIsVerifying(false);
+    setGeneratedOtp("");
+    setUserOtpInput("");
+    setTempUserData(null);
+  };
+
+  const handleResendOtp = () => {
+    if (!tempUserData) return;
+    setIsResending(true);
+    setError("");
+    const newCode = String(Math.floor(100000 + Math.random() * 900000));
+    setGeneratedOtp(newCode);
+
+    fetch("/api/auth/send-code", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        email: tempUserData.email,
+        code: newCode,
+        name: tempUserData.name
+      }),
+    })
+      .then((res) => {
+        if (!res.ok) throw new Error("Ошибка бэкенда при отправке");
+        return res.json();
+      })
+      .then(() => {
+        setIsResending(false);
+        alert("Код подтверждения был повторно отправлен! Проверьте консоль сервера.");
+      })
+      .catch((err) => {
+        console.error(err);
+        setIsResending(false);
+        setError("Не удалось отправить код повторно. Бэкенд офлайн?");
+      });
   };
 
   return (
@@ -142,17 +244,73 @@ export default function Auth({ onLoginSuccess }) {
             <span className="auth-logo-icon">✔</span>
             <span className="auth-logo-text">Task Tracker</span>
           </div>
-          <h2>{isLogin ? "Добро пожаловать!" : "Создать аккаунт"}</h2>
+          <h2>
+            {isVerifying 
+              ? "Подтверждение почты" 
+              : isLogin 
+                ? "Добро пожаловать!" 
+                : "Создать аккаунт"}
+          </h2>
           <p className="auth-subtitle">
-            {isLogin 
-              ? "Введите свои учетные данные для доступа к доске" 
-              : "Заполните форму, чтобы начать работу с проектами"}
+            {isVerifying 
+              ? `Мы отправили 6-значный код подтверждения на ${tempUserData?.email}. Проверьте консоль бэкенда.`
+              : isLogin 
+                ? "Введите свои учетные данные для доступа к доске" 
+                : "Заполните форму, чтобы начать работу с проектами"}
           </p>
         </div>
 
         {error && <div className="auth-error-box">{error}</div>}
 
-        {isLogin ? (
+        {isVerifying ? (
+          <form className="auth-form" onSubmit={handleVerifyOtpSubmit}>
+            <div className="auth-field">
+              <label htmlFor="reg-otp">Код подтверждения</label>
+              <input
+                id="reg-otp"
+                type="text"
+                maxLength={6}
+                value={userOtpInput}
+                onChange={(e) => setUserOtpInput(e.target.value.replace(/\D/g, ""))}
+                placeholder="000000"
+                style={{ 
+                  textAlign: "center", 
+                  letterSpacing: "8px", 
+                  fontSize: "20px", 
+                  fontWeight: "bold" 
+                }}
+                required
+              />
+            </div>
+
+            <button type="submit" className="auth-submit-btn">
+              Подтвердить регистрацию
+            </button>
+
+            <button 
+              type="button" 
+              className="auth-toggle-link"
+              style={{ marginTop: "12px", background: "none", border: "none", cursor: "pointer", display: "block", width: "100%", textAlign: "center" }}
+              onClick={() => {
+                setIsVerifying(false);
+                setError("");
+                setTempUserData(null);
+              }}
+            >
+              Вернуться назад
+            </button>
+
+            <button
+              type="button"
+              className="auth-toggle-link"
+              style={{ marginTop: "8px", background: "none", border: "none", cursor: "pointer", display: "block", width: "100%", textAlign: "center", opacity: isResending ? 0.6 : 1 }}
+              onClick={handleResendOtp}
+              disabled={isResending}
+            >
+              {isResending ? "Отправка..." : "Отправить код повторно"}
+            </button>
+          </form>
+        ) : isLogin ? (
           <form className="auth-form" onSubmit={handleLoginSubmit}>
             <div className="auth-field">
               <label htmlFor="login-input">ID пользователя или Email</label>
@@ -238,21 +396,23 @@ export default function Auth({ onLoginSuccess }) {
           </form>
         )}
 
-        <div className="auth-footer-toggle">
-          <span>
-            {isLogin ? "Еще нет аккаунта?" : "Уже зарегистрированы?"}
-          </span>
-          <button 
-            type="button" 
-            className="auth-toggle-link"
-            onClick={() => {
-              setIsLogin(!isLogin);
-              setError("");
-            }}
-          >
-            {isLogin ? "Создать новый аккаунт" : "Войти в существующий"}
-          </button>
-        </div>
+        {!isVerifying && (
+          <div className="auth-footer-toggle">
+            <span>
+              {isLogin ? "Еще нет аккаунта?" : "Уже зарегистрированы?"}
+            </span>
+            <button 
+              type="button" 
+              className="auth-toggle-link"
+              onClick={() => {
+                setIsLogin(!isLogin);
+                setError("");
+              }}
+            >
+              {isLogin ? "Создать новый аккаунт" : "Войти в существующий"}
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

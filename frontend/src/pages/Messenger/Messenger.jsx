@@ -24,6 +24,7 @@ export default function Messenger({
   const [recentNotifications, setRecentNotifications] = useState([
     {
       id: "not-init",
+      date: new Date().toLocaleDateString([], { day: "2-digit", month: "2-digit" }),
       time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
       title: "Система уведомлений",
       text: "Здесь будут отображаться ваши входящие упоминания в реальном времени.",
@@ -312,6 +313,7 @@ export default function Messenger({
     
     const newNotif = {
       id: `notif-${Date.now()}`,
+      date: new Date().toLocaleDateString([], { day: "2-digit", month: "2-digit" }),
       time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
       title: "Новое упоминание",
       text: "Дмитрий Иванов: 'Сделай пожалуйста ревью ПР по верстке!'",
@@ -585,7 +587,9 @@ export default function Messenger({
               <div className="notif-inbox-item" key={not.id} style={{ background: "rgba(255, 255, 255, 0.02)", border: "1px solid var(--border-color)", borderRadius: 10, padding: 12, display: "flex", flexDirection: "column", gap: 6 }}>
                 <div className="notif-item-header" style={{ display: "flex", justifyContent: "space-between", fontSize: 11, fontWeight: "bold", color: "#8b5cf6" }}>
                   <span>🔔 {not.title}</span>
-                  <span style={{ color: "var(--nav-text-inactive)", fontWeight: "normal" }}>{not.time}</span>
+                  <span style={{ color: "var(--nav-text-inactive)", fontWeight: "normal" }}>
+                    {not.date && `${not.date} `}{not.time}
+                  </span>
                 </div>
                 <p className="notif-item-text" style={{ margin: 0, fontSize: 12.5, color: "var(--text-primary)", lineHeight: 1.4 }}>{not.text}</p>
               </div>

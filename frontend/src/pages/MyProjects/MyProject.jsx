@@ -10,9 +10,22 @@ export default function MyProjects({
   onLeaveProject,
   currentUserId,
   openProject,
+  onMoveProjectUp,
+  onMoveProjectDown,
 }) {
   const [projectName, setProjectName] = useState("");
   const [inviteDrafts, setInviteDrafts] = useState({});
+  const [inviteRoles, setInviteRoles] = useState({});
+  
+  // Track which project cards are expanded
+  const [expandedProjects, setExpandedProjects] = useState({});
+
+  const toggleExpand = (projectId) => {
+    setExpandedProjects((prev) => ({
+      ...prev,
+      [projectId]: !prev[projectId],
+    }));
+  };
 
   const handleCreate = () => {
     if (!projectName.trim()) return;
@@ -22,14 +35,24 @@ export default function MyProjects({
 
   const handleInvite = (projectId) => {
     const inviteId = inviteDrafts[projectId]?.trim();
+    const role = inviteRoles[projectId] || "member";
     if (!inviteId) return;
-    onInviteUser(projectId, inviteId);
+    onInviteUser(projectId, inviteId, role);
     setInviteDrafts((prev) => ({ ...prev, [projectId]: "" }));
+    setInviteRoles((prev) => ({ ...prev, [projectId]: "member" }));
   };
 
   const isCurrentUserAdmin = (project) => {
     const me = project.members.find((m) => m.id === currentUserId);
     return me && me.role === "admin";
+  };
+
+  // Load real names mapping from localStorage
+  const allUsers = JSON.parse(localStorage.getItem("auth_users") || "[]");
+  const getUserName = (userId) => {
+    if (!userId) return "Не назначено";
+    const found = allUsers.find((u) => u.id === userId);
+    return found ? found.name : userId;
   };
 
   return (
@@ -63,102 +86,182 @@ export default function MyProjects({
         </div>
       ) : (
         <div className="projects-vertical-list">
-          {projects.map((project) => {
+          {projects.map((project, idx) => {
             const isAdmin = isCurrentUserAdmin(project);
+            const isExpanded = !!expandedProjects[project.id];
 
             return (
-              <div className="project-card-full" key={project.id}>
-                <div className="project-card-header">
-                  <div>
-                    <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap", marginBottom: "4px" }}>
-                      <h3 style={{ margin: 0 }}>{project.name}</h3>
-                      <span style={{ fontSize: "11px", fontFamily: "monospace", padding: "2px 6px", borderRadius: "4px", backgroundColor: "var(--hover-color)", border: "1px solid var(--border-color)", color: "var(--nav-text-inactive)" }}>
-                        ID: {project.id}
-                      </span>
+              <div 
+                className={`project-card-full ${isExpanded ? "expanded" : "collapsed"}`} 
+                key={project.id}
+              >
+                {/* Header: Core Info, Actions & Toggle */}
+                <div 
+                  className="project-card-header" 
+                  onClick={() => toggleExpand(project.id)}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: "16px" }}>
+                    {/* Up/Down Reorder Arrows */}
+                    <div className="reorder-arrows-wrapper" style={{ display: "flex", flexDirection: "column", gap: "2px" }} onClick={(e) => e.stopPropagation()}>
+                      <button
+                        className="reorder-arrow-btn"
+                        onClick={() => onMoveProjectUp(project.id)}
+                        disabled={idx === 0}
+                        title="Переместить вверх"
+                      >
+                        ▲
+                      </button>
+                      <button
+                        className="reorder-arrow-btn"
+                        onClick={() => onMoveProjectDown(project.id)}
+                        disabled={idx === projects.length - 1}
+                        title="Переместить вниз"
+                      >
+                        ▼
+                      </button>
                     </div>
-                    <p className="project-meta">Участников: {project.members.length}</p>
+
+                    <div>
+                      <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap", marginBottom: "4px" }}>
+                        <h3 className="project-title">{project.name}</h3>
+                        <span className="project-id-badge">
+                          ID: {project.id}
+                        </span>
+                      </div>
+                      <p className="project-meta">
+                        Участников: {project.members.length}
+                      </p>
+                    </div>
                   </div>
-                  <button className="btn primary" onClick={() => openProject(project.id)}>
-                    Открыть доску
-                  </button>
+
+                  {/* Header Actions */}
+                  <div className="project-actions-wrapper" onClick={(e) => e.stopPropagation()}>
+                    <button className="btn primary small" onClick={() => openProject(project.id, "board")}>
+                      Открыть доску
+                    </button>
+                    <button className="btn secondary small" onClick={() => openProject(project.id, "settings")} title="Открыть настройки проекта">
+                      ⚙️ Настройки
+                    </button>
+                    
+                    {/* Collapsible toggle arrow */}
+                    <button 
+                      className={`expand-arrow-toggle ${isExpanded ? "rotated" : ""}`}
+                      onClick={() => toggleExpand(project.id)}
+                    >
+                      ▼
+                    </button>
+                  </div>
                 </div>
 
-                <div className="project-card-body">
-                  <div className="project-members-section">
-                    <h4>Команда</h4>
-                    <div className="members-list">
-                      {project.members.map((member) => (
-                        <div className="member-item" key={member.id}>
-                          <div className="member-info">
-                            <div className="member-avatar">{member.id.substring(0, 2).toUpperCase()}</div>
-                            <span className="member-name">
-                              {member.id} {member.id === currentUserId && "(Вы)"}
-                            </span>
-                          </div>
-                          <div className="member-controls">
-                            {isAdmin && member.id !== currentUserId ? (
-                              <select
-                                value={member.role}
-                                onChange={(e) =>
-                                  onChangeRole(project.id, member.id, e.target.value)
-                                }
-                                className="role-select"
-                              >
-                                <option value="admin">Админ</option>
-                                <option value="member">Участник</option>
-                                <option value="viewer">Наблюдатель</option>
-                              </select>
-                            ) : (
-                              <span className="role-badge">{member.role === 'admin' ? 'Админ' : member.role === 'member' ? 'Участник' : 'Наблюдатель'}</span>
-                            )}
+                {/* Collapsible Body containing settings & members */}
+                {isExpanded && (
+                  <div className="project-card-body-wrapper page-fade-in">
+                    <div className="project-card-body">
+                      <div className="project-members-section">
+                        <h4>Команда</h4>
+                        <div className="members-list">
+                          {project.members.map((member) => (
+                            <div className="member-item" key={member.id}>
+                              <div className="member-info">
+                                <div className="member-avatar" title={getUserName(member.id)}>
+                                  {getUserName(member.id).substring(0, 2).toUpperCase()}
+                                </div>
+                                <span className="member-name">
+                                  {getUserName(member.id)} <span className="member-id-paren">({member.id})</span> {member.id === currentUserId && "(Вы)"}
+                                </span>
+                              </div>
+                              <div className="member-controls">
+                                {isAdmin && member.id !== currentUserId ? (
+                                  <select
+                                    value={member.role}
+                                    onChange={(e) =>
+                                      onChangeRole(project.id, member.id, e.target.value)
+                                    }
+                                    className="role-select"
+                                  >
+                                    <option value="admin">Админ</option>
+                                    <option value="member">Участник</option>
+                                    <option value="viewer">Наблюдатель</option>
+                                  </select>
+                                ) : (
+                                  <span className="role-badge">{member.role === 'admin' ? 'Админ' : member.role === 'member' ? 'Участник' : 'Наблюдатель'}</span>
+                                )}
 
-                            {isAdmin && member.id !== currentUserId && (
-                              <button
-                                className="btn icon-btn danger"
-                                onClick={() => onLeaveProject(project.id, member.id)}
-                                title="Удалить участника"
-                              >
-                                ×
-                              </button>
-                            )}
+                                {isAdmin && member.id !== currentUserId && (
+                                  <button
+                                    className="btn icon-btn danger"
+                                    onClick={() => onLeaveProject(project.id, member.id)}
+                                    title="Удалить участника"
+                                  >
+                                    ×
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      {isAdmin && (
+                        <div className="project-invite-section">
+                          <h4>Пригласить участника</h4>
+                          <div className="invite-form">
+                            <input
+                              type="text"
+                              value={inviteDrafts[project.id] || ""}
+                              onChange={(e) =>
+                                setInviteDrafts({
+                                  ...inviteDrafts,
+                                  [project.id]: e.target.value,
+                                })
+                              }
+                              placeholder="ID пользователя (например, INV-1234)"
+                              onKeyDown={(e) => e.key === "Enter" && handleInvite(project.id)}
+                            />
+                            <select
+                              value={inviteRoles[project.id] || "member"}
+                              onChange={(e) =>
+                                setInviteRoles({
+                                  ...inviteRoles,
+                                  [project.id]: e.target.value,
+                                })
+                              }
+                              className="role-select"
+                              style={{
+                                padding: "10px 14px",
+                                borderRadius: "8px",
+                                border: "1px solid var(--border-color)",
+                                background: "var(--bg-surface)",
+                                color: "var(--text-primary)",
+                                height: "auto"
+                              }}
+                            >
+                              <option value="member">Участник</option>
+                              <option value="viewer">Наблюдатель</option>
+                              <option value="admin">Админ</option>
+                            </select>
+                            <button className="btn secondary" onClick={() => handleInvite(project.id)}>
+                              Пригласить
+                            </button>
                           </div>
                         </div>
-                      ))}
+                      )}
+                    </div>
+
+                    <div className="project-card-footer">
+                      <button
+                        className="btn danger"
+                        onClick={() => {
+                          if (window.confirm("Вы действительно хотите выйти из этого проекта?")) {
+                            onLeaveProject(project.id, currentUserId);
+                          }
+                        }}
+                      >
+                        Выйти из проекта
+                      </button>
                     </div>
                   </div>
-
-                  {isAdmin && (
-                    <div className="project-invite-section">
-                      <h4>Пригласить участника</h4>
-                      <div className="invite-form">
-                        <input
-                          type="text"
-                          value={inviteDrafts[project.id] || ""}
-                          onChange={(e) =>
-                            setInviteDrafts({
-                              ...inviteDrafts,
-                              [project.id]: e.target.value,
-                            })
-                          }
-                          placeholder="ID пользователя (например, INV-1234)"
-                          onKeyDown={(e) => e.key === "Enter" && handleInvite(project.id)}
-                        />
-                        <button className="btn secondary" onClick={() => handleInvite(project.id)}>
-                          Пригласить
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                <div className="project-card-footer">
-                  <button
-                    className="btn danger-outline"
-                    onClick={() => onLeaveProject(project.id, currentUserId)}
-                  >
-                    Выйти из проекта
-                  </button>
-                </div>
+                )}
               </div>
             );
           })}

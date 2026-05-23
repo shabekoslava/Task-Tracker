@@ -533,19 +533,27 @@
   font-size: 22px;
   font-weight: 600;
   color: var(--text-primary);
-  background: transparent;
-  border: 1px solid transparent;
+  background: var(--hover-color);
+  border: 1px dashed var(--border-color);
   width: 100%;
-  padding: 4px 8px;
-  margin-left: -8px;
-  border-radius: 6px;
+  padding: 8px 12px;
+  border-radius: 8px;
   outline: none;
+  transition: all 0.25s ease;
+}
+
+.modal-title-input:hover {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: var(--accent-color);
 }
 
 .modal-title-input:focus {
+  border-style: solid;
   border-color: var(--accent-color);
   background: var(--bg-surface);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
 }
+
 
 .close-btn {
   background: none;
@@ -693,3 +701,18 @@
   gap: 12px;
   background: var(--bg-surface);
 }
+
+.project-settings-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 30px;
+  align-items: start;
+}
+
+@media (max-width: 1024px) {
+  .project-settings-grid {
+    grid-template-columns: 1fr;
+    gap: 20px;
+  }
+}
+

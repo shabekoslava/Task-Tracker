@@ -1,5 +1,5 @@
 // src/App.jsx
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import Sidebar from "./components/Sidebar/Sidebar";
 import ProjectBoard from "./components/ProjectBoard/ProjectBoard";
 import MyProfile from "./pages/MyProfile/MyProfile";
@@ -14,6 +14,8 @@ export default function App() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [currentTab, setCurrentTab] = useState("Мои задачи");
   const [isDark, setIsDark] = useState(true);
+  const [initialProjectTab, setInitialProjectTab] = useState("board"); // "board" | "settings"
+
 
   // 👤 Auth State: loaded from localStorage session
   const [currentUser, setCurrentUser] = useState(() => {
@@ -40,6 +42,65 @@ export default function App() {
     const storedChats = localStorage.getItem("project_tracker_chats");
     return storedChats ? JSON.parse(storedChats) : [];
   });
+
+  const wsRef = useRef(null);
+  const isIncomingSyncRef = useRef(false);
+
+  // ⚡ Initialize Reconnecting WebSocket Connection for Real-Time State Sync
+  useEffect(() => {
+    let socket;
+    let reconnectTimeout;
+
+    const connectWS = () => {
+      const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+      const host = window.location.host;
+      const wsUrl = `${protocol}//${host}/ws`;
+
+      console.log("⚡ Connecting to real-time WebSockets sync:", wsUrl);
+      socket = new WebSocket(wsUrl);
+      wsRef.current = socket;
+
+      socket.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          if (data.type === "SYNC_STATE") {
+            console.log("⚡ Real-time WebSocket sync update received:", data);
+            isIncomingSyncRef.current = true;
+            if (data.projects) {
+              localStorage.setItem("project_tracker_projects", JSON.stringify(data.projects));
+              setProjects(data.projects);
+            }
+            if (data.chats) {
+              localStorage.setItem("project_tracker_chats", JSON.stringify(data.chats));
+              setChats(data.chats);
+            }
+          }
+        } catch (err) {
+          console.error("Failed to parse WebSocket sync message:", err);
+        }
+      };
+
+      socket.onclose = () => {
+        console.log("⚡ WebSocket connection closed. Reconnecting in 3s...");
+        reconnectTimeout = setTimeout(connectWS, 3000);
+      };
+
+      socket.onerror = (err) => {
+        console.error("⚡ WebSocket error:", err);
+        socket.close();
+      };
+    };
+
+    connectWS();
+
+    return () => {
+      if (socket) {
+        socket.onclose = null;
+        socket.close();
+      }
+      clearTimeout(reconnectTimeout);
+    };
+  }, []);
 
   const selectedProject = currentTab.startsWith("project-")
     ? projects.find((project) => currentTab === `project-${project.id}`)
@@ -75,10 +136,25 @@ export default function App() {
       });
   }, []);
 
-  // Sync projects and chats with localStorage and backend
+  // Sync projects and chats with localStorage, backend, and WebSockets
   useEffect(() => {
     localStorage.setItem("project_tracker_projects", JSON.stringify(projects));
     localStorage.setItem("project_tracker_chats", JSON.stringify(chats));
+
+    // If this update was triggered by an incoming WebSocket sync, prevent loop
+    if (isIncomingSyncRef.current) {
+      isIncomingSyncRef.current = false;
+      return;
+    }
+
+    // Broadcast state mutation to other clients over WebSocket
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({
+        type: "SYNC_STATE",
+        projects,
+        chats
+      }));
+    }
     
     // Background push to backend
     const users = JSON.parse(localStorage.getItem("auth_users") || "[]");
@@ -257,7 +333,9 @@ export default function App() {
     const nextProject = {
       id: projectId,
       name: trimmed,
+      description: "",
       members: [{ id: currentUserId, role: "admin" }],
+      tags: ["дизайн", "баг", "срочно", "фича", "фронтенд", "бэкенд"],
       columns: [
         { id: `${projectId}-todo`, name: "В ожидании", taskIds: [] },
         { id: `${projectId}-inwork`, name: "В работе", taskIds: [] },
@@ -272,7 +350,20 @@ export default function App() {
     return true;
   };
 
-  const inviteUser = (projectId, userId) => {
+  const editProject = (projectId, updates) => {
+    setProjects((prev) =>
+      prev.map((project) => {
+        if (project.id !== projectId) return project;
+        return {
+          ...project,
+          ...updates,
+        };
+      })
+    );
+  };
+
+
+  const inviteUser = (projectId, userId, role = "member") => {
     const trimmed = userId.trim();
     if (!trimmed) return false;
 
@@ -280,7 +371,7 @@ export default function App() {
       prev.map((project) => {
         if (project.id !== projectId) return project;
         if (project.members.some((m) => m.id === trimmed)) return project;
-        return { ...project, members: [...project.members, { id: trimmed, role: "member" }] };
+        return { ...project, members: [...project.members, { id: trimmed, role: role }] };
       }),
     );
 
@@ -316,6 +407,29 @@ export default function App() {
     if (currentUserId === userId && currentTab === `project-${projectId}`) {
       setCurrentTab("Мои проекты");
     }
+  };
+
+  const addProjectTag = (projectId, tag) => {
+    const trimmed = tag.trim();
+    if (!trimmed) return;
+    setProjects((prev) =>
+      prev.map((project) => {
+        if (project.id !== projectId) return project;
+        const currentTags = project.tags || ["дизайн", "баг", "срочно", "фича", "фронтенд", "бэкенд"];
+        if (currentTags.includes(trimmed)) return project;
+        return { ...project, tags: [...currentTags, trimmed] };
+      })
+    );
+  };
+
+  const removeProjectTag = (projectId, tag) => {
+    setProjects((prev) =>
+      prev.map((project) => {
+        if (project.id !== projectId) return project;
+        const currentTags = project.tags || ["дизайн", "баг", "срочно", "фича", "фронтенд", "бэкенд"];
+        return { ...project, tags: currentTags.filter((t) => t !== tag) };
+      })
+    );
   };
 
   const addColumn = (projectId, name) => {
@@ -511,9 +625,35 @@ export default function App() {
     );
   };
 
-  const openProject = (projectId) => {
+  const openProject = (projectId, initialTab = "board") => {
+    setInitialProjectTab(initialTab);
     setCurrentTab(`project-${projectId}`);
   };
+
+  const moveProjectUp = (projectId) => {
+    setProjects((prev) => {
+      const index = prev.findIndex((p) => p.id === projectId);
+      if (index <= 0) return prev;
+      const updated = [...prev];
+      const temp = updated[index];
+      updated[index] = updated[index - 1];
+      updated[index - 1] = temp;
+      return updated;
+    });
+  };
+
+  const moveProjectDown = (projectId) => {
+    setProjects((prev) => {
+      const index = prev.findIndex((p) => p.id === projectId);
+      if (index === -1 || index >= prev.length - 1) return prev;
+      const updated = [...prev];
+      const temp = updated[index];
+      updated[index] = updated[index + 1];
+      updated[index + 1] = temp;
+      return updated;
+    });
+  };
+
 
   // --- Filtering Received & Sent Invites for children ---
   const receivedInvites = invitations.filter(
@@ -540,6 +680,14 @@ export default function App() {
           onAddComment={addComment}
           onToggleTaskComplete={toggleTaskComplete}
           onMoveTask={moveTask}
+          onEditProject={editProject}
+          onInviteUser={inviteUser}
+          onChangeRole={changeUserRole}
+          onLeaveProject={leaveProject}
+          currentUserId={currentUserId}
+          initialViewMode={initialProjectTab}
+          onAddProjectTag={addProjectTag}
+          onRemoveProjectTag={removeProjectTag}
         />
       );
     }
@@ -554,6 +702,8 @@ export default function App() {
           onLeaveProject={leaveProject}
           currentUserId={currentUserId}
           openProject={openProject}
+          onMoveProjectUp={moveProjectUp}
+          onMoveProjectDown={moveProjectDown}
         />
       );
     }
@@ -611,6 +761,7 @@ export default function App() {
         setCurrentTab={setCurrentTab}
         projects={projects}
         currentUserId={currentUserId}
+        openProject={openProject}
       />
       <main className="main-wrapper">
         <header className="header">

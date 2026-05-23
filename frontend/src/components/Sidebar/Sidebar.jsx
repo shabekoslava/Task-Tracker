@@ -17,6 +17,7 @@ export default function Sidebar({
   setCurrentTab,
   projects,
   currentUserId,
+  openProject,
 }) {
   const menuItems = [
     { id: "Мои задачи", name: "Мои задачи", Icon: TasksIcon },
@@ -87,7 +88,13 @@ export default function Sidebar({
                     <button
                       key={project.id}
                       className={`nav-item ${currentTab === `project-${project.id}` ? "active" : ""}`}
-                      onClick={() => setCurrentTab(`project-${project.id}`)}
+                      onClick={() => {
+                        if (openProject) {
+                          openProject(project.id, "board");
+                        } else {
+                          setCurrentTab(`project-${project.id}`);
+                        }
+                      }}
                     >
                       <ProjectsIcon className="nav-icon-svg" />
                       {isOpen && <span className="nav-text">{project.name}</span>}

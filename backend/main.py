@@ -2,7 +2,7 @@
 import os
 import json
 from typing import Dict, List, Any
-from fastapi import FastAPI, Body
+from fastapi import FastAPI, Body, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI()
@@ -14,6 +14,43 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ⚡ Real-Time Connection Manager for WebSockets
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: List[WebSocket] = []
+
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections.append(websocket)
+
+    def disconnect(self, websocket: WebSocket):
+        if websocket in self.active_connections:
+            self.active_connections.remove(websocket)
+
+    async def broadcast(self, message: dict, exclude: WebSocket = None):
+        for connection in self.active_connections:
+            if connection != exclude:
+                try:
+                    await connection.send_json(message)
+                except Exception:
+                    pass
+
+manager = ConnectionManager()
+
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    await manager.connect(websocket)
+    try:
+        while True:
+            # Listen to incoming sync data broadcasted by one of the clients
+            data = await websocket.receive_json()
+            # Broadcast the new state to all other connected clients
+            await manager.broadcast(data, exclude=websocket)
+    except WebSocketDisconnect:
+        manager.disconnect(websocket)
+    except Exception:
+        manager.disconnect(websocket)
 
 # 💡 Make DB file path robust and independent of launch cwd
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -116,3 +153,22 @@ def sync_data(data: dict = Body(...)):
         db["chats"] = data["chats"]
     save_db(db)
     return {"status": "success", "message": "State synchronized successfully"}
+
+@app.post("/api/auth/send-code")
+def send_verification_code(data: dict = Body(...)):
+    """Simulate sending a verification code by printing it to the console in a highlighted block."""
+    email = data.get("email")
+    code = data.get("code")
+    name = data.get("name")
+    
+    if not email or not code:
+        return {"status": "error", "message": "Email and code are required"}
+        
+    print("\n" + "═"*60)
+    print(f"📧 [EMAIL VERIFICATION CODE] ДЛЯ: {name} ({email})")
+    print("═"*60)
+    print(f"👉   ВАШ КОД ПОДТВЕРЖДЕНИЯ:  {code}  👈")
+    print("═"*60 + "\n")
+    
+    return {"status": "success", "message": f"Verification code sent to {email}"}
+
