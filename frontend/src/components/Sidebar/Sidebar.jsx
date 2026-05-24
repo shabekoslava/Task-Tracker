@@ -78,7 +78,7 @@ export default function Sidebar({
           <>
             {(() => {
               const userProjects = projects.filter((project) =>
-                project.members.some((m) => m.id === currentUserId)
+                project.members.some((m) => m.id === currentUserId),
               );
               if (userProjects.length === 0) return null;
               return (
@@ -97,7 +97,9 @@ export default function Sidebar({
                       }}
                     >
                       <ProjectsIcon className="nav-icon-svg" />
-                      {isOpen && <span className="nav-text">{project.name}</span>}
+                      {isOpen && (
+                        <span className="nav-text">{project.name}</span>
+                      )}
                     </button>
                   ))}
                 </>

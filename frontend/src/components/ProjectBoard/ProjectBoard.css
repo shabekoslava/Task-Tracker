@@ -676,7 +676,9 @@
   padding: 0 8px;
   height: 32px;
   box-sizing: border-box;
-  transition: border-color 0.2s, background 0.2s;
+  transition:
+    border-color 0.2s,
+    background 0.2s;
 }
 
 .estimate-input-container:focus-within {
@@ -709,7 +711,7 @@
   -webkit-appearance: none;
   margin: 0;
 }
-.estimate-field-wrapper input[type=number] {
+.estimate-field-wrapper input[type="number"] {
   -moz-appearance: textfield;
 }
 

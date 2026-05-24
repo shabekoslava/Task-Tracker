@@ -173,7 +173,8 @@
   color: var(--nav-text-inactive);
 }
 
-.sender-id, .recipient-id {
+.sender-id,
+.recipient-id {
   font-family: monospace;
   background-color: var(--hover-color);
   padding: 2px 6px;
@@ -288,4 +289,3 @@
   font-size: 13px;
   border-radius: 6px;
 }
-

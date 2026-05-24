@@ -18,7 +18,6 @@ export default function App() {
   const [initialActiveTaskId, setInitialActiveTaskId] = useState(null);
   const [openedFromMyTasks, setOpenedFromMyTasks] = useState(false);
 
-
   // 👤 Auth State: loaded from localStorage session
   const [currentUser, setCurrentUser] = useState(() => {
     const session = localStorage.getItem("active_user_session");
@@ -69,11 +68,17 @@ export default function App() {
             console.log("⚡ Real-time WebSocket sync update received:", data);
             isIncomingSyncRef.current = true;
             if (data.projects) {
-              localStorage.setItem("project_tracker_projects", JSON.stringify(data.projects));
+              localStorage.setItem(
+                "project_tracker_projects",
+                JSON.stringify(data.projects),
+              );
               setProjects(data.projects);
             }
             if (data.chats) {
-              localStorage.setItem("project_tracker_chats", JSON.stringify(data.chats));
+              localStorage.setItem(
+                "project_tracker_chats",
+                JSON.stringify(data.chats),
+              );
               setChats(data.chats);
             }
           }
@@ -118,23 +123,35 @@ export default function App() {
       .then((data) => {
         console.log("State synchronized from FastAPI:", data);
         if (data.projects) {
-          localStorage.setItem("project_tracker_projects", JSON.stringify(data.projects));
+          localStorage.setItem(
+            "project_tracker_projects",
+            JSON.stringify(data.projects),
+          );
           setProjects(data.projects);
         }
         if (data.invitations) {
-          localStorage.setItem("project_invitations", JSON.stringify(data.invitations));
+          localStorage.setItem(
+            "project_invitations",
+            JSON.stringify(data.invitations),
+          );
           setInvitations(data.invitations);
         }
         if (data.users && data.users.length > 0) {
           localStorage.setItem("auth_users", JSON.stringify(data.users));
         }
         if (data.chats) {
-          localStorage.setItem("project_tracker_chats", JSON.stringify(data.chats));
+          localStorage.setItem(
+            "project_tracker_chats",
+            JSON.stringify(data.chats),
+          );
           setChats(data.chats);
         }
       })
       .catch((err) => {
-        console.log("FastAPI offline, using offline localStorage mode:", err.message);
+        console.log(
+          "FastAPI offline, using offline localStorage mode:",
+          err.message,
+        );
       });
   }, []);
 
@@ -151,20 +168,24 @@ export default function App() {
 
     // Broadcast state mutation to other clients over WebSocket
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({
-        type: "SYNC_STATE",
-        projects,
-        chats
-      }));
+      wsRef.current.send(
+        JSON.stringify({
+          type: "SYNC_STATE",
+          projects,
+          chats,
+        }),
+      );
     }
-    
+
     // Background push to backend
     const users = JSON.parse(localStorage.getItem("auth_users") || "[]");
     fetch("/api/sync", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ projects, users, chats }),
-    }).catch((err) => console.log("Failed to sync projects to FastAPI:", err.message));
+    }).catch((err) =>
+      console.log("Failed to sync projects to FastAPI:", err.message),
+    );
   }, [projects, chats]);
 
   // Sync invitations with localStorage and backend
@@ -176,7 +197,9 @@ export default function App() {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ invitations }),
-    }).catch((err) => console.log("Failed to sync invitations to FastAPI:", err.message));
+    }).catch((err) =>
+      console.log("Failed to sync invitations to FastAPI:", err.message),
+    );
   }, [invitations]);
 
   // Sync registered users when currentUser logs in/out
@@ -187,7 +210,9 @@ export default function App() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ users }),
-      }).catch((err) => console.log("Failed to sync users to FastAPI:", err.message));
+      }).catch((err) =>
+        console.log("Failed to sync users to FastAPI:", err.message),
+      );
     }
   }, [currentUser]);
 
@@ -243,9 +268,9 @@ export default function App() {
         if (project.id !== projectId) return project;
         return {
           ...project,
-          members: [...project.members, { id: currentUserId, role: role }]
+          members: [...project.members, { id: currentUserId, role: role }],
         };
-      })
+      }),
     );
 
     return true;
@@ -258,18 +283,30 @@ export default function App() {
     }
 
     // Verify if recipient exists in registered users
-    const registeredUsers = JSON.parse(localStorage.getItem("auth_users") || "[]");
+    const registeredUsers = JSON.parse(
+      localStorage.getItem("auth_users") || "[]",
+    );
     const recipientExists = registeredUsers.some(
-      (u) => u.id.toUpperCase() === targetUserId.toUpperCase()
+      (u) => u.id.toUpperCase() === targetUserId.toUpperCase(),
     );
 
     if (!recipientExists) {
-      return { success: false, message: `Пользователь с ID ${targetUserId} не зарегистрирован` };
+      return {
+        success: false,
+        message: `Пользователь с ID ${targetUserId} не зарегистрирован`,
+      };
     }
 
     // Check if target is already in project members
-    if (targetProject.members.some((m) => m.id.toUpperCase() === targetUserId.toUpperCase())) {
-      return { success: false, message: "Пользователь уже является участником этого проекта" };
+    if (
+      targetProject.members.some(
+        (m) => m.id.toUpperCase() === targetUserId.toUpperCase(),
+      )
+    ) {
+      return {
+        success: false,
+        message: "Пользователь уже является участником этого проекта",
+      };
     }
 
     // Check if a pending invite already exists
@@ -277,11 +314,14 @@ export default function App() {
       (inv) =>
         inv.projectId === projectId &&
         inv.invitedUser.toUpperCase() === targetUserId.toUpperCase() &&
-        inv.status === "pending"
+        inv.status === "pending",
     );
 
     if (duplicateInvite) {
-      return { success: false, message: "Приглашение этому пользователю уже отправлено" };
+      return {
+        success: false,
+        message: "Приглашение этому пользователю уже отправлено",
+      };
     }
 
     // Generate new invite
@@ -292,11 +332,14 @@ export default function App() {
       invitedBy: currentUserId,
       invitedUser: targetUserId,
       status: "pending",
-      role: role
+      role: role,
     };
 
     setInvitations((prev) => [...prev, newInvite]);
-    return { success: true, message: `Приглашение успешно отправлено для ${targetUserId}!` };
+    return {
+      success: true,
+      message: `Приглашение успешно отправлено для ${targetUserId}!`,
+    };
   };
 
   const handleAcceptInvite = (inviteId, projectId) => {
@@ -306,10 +349,12 @@ export default function App() {
 
     // 1. Join project with custom role
     const success = handleJoinProjectById(projectId, selectedRole);
-    
+
     // 2. Mark invitation status as accepted
     setInvitations((prev) =>
-      prev.map((inv) => (inv.id === inviteId ? { ...inv, status: "accepted" } : inv))
+      prev.map((inv) =>
+        inv.id === inviteId ? { ...inv, status: "accepted" } : inv,
+      ),
     );
 
     if (success) {
@@ -322,8 +367,18 @@ export default function App() {
 
   const handleDeclineInvite = (inviteId) => {
     setInvitations((prev) =>
-      prev.map((inv) => (inv.id === inviteId ? { ...inv, status: "declined" } : inv))
+      prev.map((inv) =>
+        inv.id === inviteId ? { ...inv, status: "declined" } : inv,
+      ),
     );
+  };
+
+  const handleCancelInvite = (inviteId) => {
+    setInvitations((prev) => prev.filter((inv) => inv.id !== inviteId));
+  };
+
+  const handleClearInviteHistory = () => {
+    setInvitations((prev) => prev.filter((inv) => inv.status === "pending"));
   };
 
   // --- Project Board Callbacks ---
@@ -361,10 +416,9 @@ export default function App() {
           ...project,
           ...updates,
         };
-      })
+      }),
     );
   };
-
 
   const inviteUser = (projectId, userId, role = "member") => {
     const trimmed = userId.trim();
@@ -374,7 +428,10 @@ export default function App() {
       prev.map((project) => {
         if (project.id !== projectId) return project;
         if (project.members.some((m) => m.id === trimmed)) return project;
-        return { ...project, members: [...project.members, { id: trimmed, role: role }] };
+        return {
+          ...project,
+          members: [...project.members, { id: trimmed, role: role }],
+        };
       }),
     );
 
@@ -388,10 +445,10 @@ export default function App() {
         return {
           ...project,
           members: project.members.map((m) =>
-            m.id === userId ? { ...m, role: newRole } : m
+            m.id === userId ? { ...m, role: newRole } : m,
           ),
         };
-      })
+      }),
     );
   };
 
@@ -425,10 +482,17 @@ export default function App() {
     setProjects((prev) =>
       prev.map((project) => {
         if (project.id !== projectId) return project;
-        const currentTags = project.tags || ["дизайн", "баг", "срочно", "фича", "фронтенд", "бэкенд"];
+        const currentTags = project.tags || [
+          "дизайн",
+          "баг",
+          "срочно",
+          "фича",
+          "фронтенд",
+          "бэкенд",
+        ];
         if (currentTags.includes(trimmed)) return project;
         return { ...project, tags: [...currentTags, trimmed] };
-      })
+      }),
     );
   };
 
@@ -436,9 +500,16 @@ export default function App() {
     setProjects((prev) =>
       prev.map((project) => {
         if (project.id !== projectId) return project;
-        const currentTags = project.tags || ["дизайн", "баг", "срочно", "фича", "фронтенд", "бэкенд"];
+        const currentTags = project.tags || [
+          "дизайн",
+          "баг",
+          "срочно",
+          "фича",
+          "фронтенд",
+          "бэкенд",
+        ];
         return { ...project, tags: currentTags.filter((t) => t !== tag) };
-      })
+      }),
     );
   };
 
@@ -516,7 +587,7 @@ export default function App() {
         }
 
         return { ...project, columns };
-      })
+      }),
     );
   };
 
@@ -596,7 +667,7 @@ export default function App() {
           tasks: updatedTasks,
           columns: updatedColumns,
         };
-      })
+      }),
     );
   };
 
@@ -706,14 +777,15 @@ export default function App() {
     });
   };
 
-
   // --- Filtering Received & Sent Invites for children ---
   const receivedInvites = invitations.filter(
-    (inv) => inv.invitedUser.toUpperCase() === currentUserId.toUpperCase() && inv.status === "pending"
+    (inv) =>
+      inv.invitedUser.toUpperCase() === currentUserId.toUpperCase() &&
+      inv.status === "pending",
   );
-  
+
   const sentInvites = invitations.filter(
-    (inv) => inv.invitedBy.toUpperCase() === currentUserId.toUpperCase()
+    (inv) => inv.invitedBy.toUpperCase() === currentUserId.toUpperCase(),
   );
 
   // --- Page Switcher ---
@@ -722,7 +794,10 @@ export default function App() {
       return (
         <ProjectBoard
           project={selectedProject}
-          currentUserRole={selectedProject.members.find((m) => m.id === currentUserId)?.role || "viewer"}
+          currentUserRole={
+            selectedProject.members.find((m) => m.id === currentUserId)?.role ||
+            "viewer"
+          }
           members={selectedProject.members.map((m) => m.id)}
           onAddColumn={addColumn}
           onRenameColumn={renameColumn}
@@ -758,7 +833,9 @@ export default function App() {
     if (currentTab === "Мои проекты") {
       return (
         <MyProjects
-          projects={projects.filter((p) => p.members.some((m) => m.id === currentUserId))}
+          projects={projects.filter((p) =>
+            p.members.some((m) => m.id === currentUserId),
+          )}
           onCreateProject={createProject}
           onInviteUser={inviteUser}
           onChangeRole={changeUserRole}
@@ -821,6 +898,8 @@ export default function App() {
           onSendInvite={handleSendInvite}
           onAcceptInvite={handleAcceptInvite}
           onDeclineInvite={handleDeclineInvite}
+          onCancelInvite={handleCancelInvite}
+          onClearInviteHistory={handleClearInviteHistory}
         />
       );
     }
@@ -846,11 +925,29 @@ export default function App() {
       />
       <main className="main-wrapper">
         <header className="header">
-          <div className="logo-text" style={{ color: "var(--text-color)", display: "flex", alignItems: "center", gap: "10px" }}>
+          <div
+            className="logo-text"
+            style={{
+              color: "var(--text-color)",
+              display: "flex",
+              alignItems: "center",
+              gap: "10px",
+            }}
+          >
             {currentTab.startsWith("project-") && selectedProject ? (
               <>
                 <span>{selectedProject.name}</span>
-                <span style={{ fontSize: "12px", color: "var(--nav-text-inactive)", backgroundColor: "var(--hover-color)", padding: "2px 8px", borderRadius: "4px", border: "1px solid var(--border-color)", fontFamily: "monospace" }}>
+                <span
+                  style={{
+                    fontSize: "12px",
+                    color: "var(--nav-text-inactive)",
+                    backgroundColor: "var(--hover-color)",
+                    padding: "2px 8px",
+                    borderRadius: "4px",
+                    border: "1px solid var(--border-color)",
+                    fontFamily: "monospace",
+                  }}
+                >
                   ID: {selectedProject.id}
                 </span>
               </>

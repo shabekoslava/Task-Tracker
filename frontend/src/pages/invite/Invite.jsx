@@ -10,7 +10,9 @@ export default function Invite({
   onJoinProjectById,
   onSendInvite,
   onAcceptInvite,
-  onDeclineInvite
+  onDeclineInvite,
+  onCancelInvite,
+  onClearInviteHistory
 }) {
   const [projectIdInput, setProjectIdInput] = useState("");
   const [joinError, setJoinError] = useState("");
@@ -81,11 +83,14 @@ export default function Invite({
     alert(`Ваш ID (${currentUserId}) успешно скопирован в буфер обмена!`);
   };
 
+  // Check if there is any history (accepted or declined) to clean
+  const hasHistory = sentInvites.some(inv => inv.status !== "pending") || receivedInvites.some(inv => inv.status !== "pending");
+
   return (
     <div className="page-fade-in invite-page">
       <div className="invite-header-section">
-        <h2>Центр приглашений</h2>
-        <p>Ваш уникальный ID: <span className="user-id-highlight" onClick={copyUserId} style={{ cursor: "pointer" }} title="Нажмите, чтобы скопировать">{currentUserId} 📋</span></p>
+        <h2>Приглашения</h2>
+        <p>Ваш личный ID: <span className="user-id-highlight" onClick={copyUserId} style={{ cursor: "pointer" }} title="Нажмите, чтобы скопировать">{currentUserId} 📋</span></p>
       </div>
 
       <div className="invite-grid-layouts">
@@ -93,8 +98,7 @@ export default function Invite({
         <div className="invite-forms-column">
           {/* Join Project Card */}
           <div className="invite-card">
-            <h3>Вступить в проект по ID</h3>
-            <p className="card-subtitle-text">Введите уникальный идентификатор проекта, чтобы мгновенно присоединиться к доске.</p>
+            <h3>Войти в проект по ID проекта</h3>
             
             <form onSubmit={handleJoinByCode} className="invite-form-element">
               <input
@@ -113,8 +117,7 @@ export default function Invite({
 
           {/* Send Invite Card */}
           <div className="invite-card">
-            <h3>Пригласить коллегу в проект</h3>
-            <p className="card-subtitle-text">Отправьте приглашение пользователю по его уникальному ID (доступно для проектов, где вы являетесь Админом).</p>
+            <h3>Отправить приглашение</h3>
 
             {adminProjects.length === 0 ? (
               <p className="no-admin-projects-warn">Вы не являетесь администратором ни одного проекта. Чтобы приглашать коллег, создайте проект во вкладке "Мои проекты".</p>
@@ -174,12 +177,11 @@ export default function Invite({
         <div className="invite-lists-column">
           {/* Incoming Card */}
           <div className="invite-card">
-            <h3>Входящие приглашения</h3>
-            <p className="card-subtitle-text">Предложения вступить в проекты от других участников.</p>
+            <h3>Входящие приглашения ({receivedInvites.length})</h3>
             
             {receivedInvites.length === 0 ? (
               <div className="empty-state-list-text">
-                Нет входящих приглашений
+                Пока никто не присылал вам приглашений.
               </div>
             ) : (
               <div className="invitations-list-wrapper">
@@ -218,12 +220,18 @@ export default function Invite({
 
           {/* Outgoing Card */}
           <div className="invite-card">
-            <h3>Отправленные приглашения</h3>
-            <p className="card-subtitle-text">История отправленных вами запросов и их статус.</p>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
+              <h3>Исходящие приглашения ({sentInvites.length})</h3>
+              {hasHistory && (
+                <button className="btn-link-clear" onClick={onClearInviteHistory} title="Удалить принятые и отклоненные из истории">
+                  Очистить историю
+                </button>
+              )}
+            </div>
 
             {sentInvites.length === 0 ? (
               <div className="empty-state-list-text">
-                Вы еще не отправляли приглашений
+                Вы пока не приглашали коллег.
               </div>
             ) : (
               <div className="invitations-list-wrapper">
@@ -240,15 +248,34 @@ export default function Invite({
                         Кому: <span className="recipient-id">{inv.invitedUser}</span> | Роль: <span style={{ fontWeight: "600", color: "var(--primary-color)" }}>{inv.role === 'admin' ? 'Админ' : inv.role === 'member' ? 'Участник' : 'Наблюдатель'}</span>
                       </div>
                     </div>
-                    <div className="inv-status-tag">
-                      {inv.status === "pending" && (
-                        <span className="status-badge pending">В ожидании</span>
-                      )}
-                      {inv.status === "accepted" && (
-                        <span className="status-badge accepted">Принято</span>
-                      )}
-                      {inv.status === "declined" && (
-                        <span className="status-badge declined">Отклонено</span>
+                    <div className="inv-actions-status">
+                      {inv.status === "pending" ? (
+                        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                          <span className="status-badge pending">В ожидании</span>
+                          <button 
+                            className="btn-icon-cancel" 
+                            onClick={() => onCancelInvite(inv.id)}
+                            title="Отменить и отозвать приглашение"
+                          >
+                            &times;
+                          </button>
+                        </div>
+                      ) : (
+                        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                          {inv.status === "accepted" && (
+                            <span className="status-badge accepted">Принято</span>
+                          )}
+                          {inv.status === "declined" && (
+                            <span className="status-badge declined">Отклонено</span>
+                          )}
+                          <button 
+                            className="btn-icon-delete" 
+                            onClick={() => onCancelInvite(inv.id)} // Uses the same filter callback
+                            title="Удалить из истории"
+                          >
+                            🗑️
+                          </button>
+                        </div>
                       )}
                     </div>
                   </div>
