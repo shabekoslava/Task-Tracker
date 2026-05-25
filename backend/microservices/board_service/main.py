@@ -1,15 +1,13 @@
-# backend/main.py
+# backend/microservices/board_service/main.py
 import os
 import traceback
+import json
 from typing import List, Dict, Any, Optional
-from fastapi import FastAPI, Body, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi import FastAPI, Body, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 import databases
 from datetime import datetime
 
-# =============================================================================
-# Подключение к PostgreSQL
-# =============================================================================
 DATABASE_URL = os.getenv(
     "DATABASE_URL",
     "postgresql+asyncpg://postgres:Slava2005@localhost:5432/task_tracker_bd"
@@ -17,10 +15,8 @@ DATABASE_URL = os.getenv(
 
 database = databases.Database(DATABASE_URL)
 
-# =============================================================================
-# FastAPI приложение и CORS
-# =============================================================================
-app = FastAPI()
+app = FastAPI(title="Board & Project Service")
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -28,51 +24,19 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# =============================================================================
-# WebSocket менеджер
-# =============================================================================
-class ConnectionManager:
-    def __init__(self):
-        self.active_connections: List[WebSocket] = []
+# Инициализация Kafka продюсера
+KAFKA_BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS")
+producer = None
 
-    async def connect(self, websocket: WebSocket):
-        await websocket.accept()
-        self.active_connections.append(websocket)
-
-    def disconnect(self, websocket: WebSocket):
-        if websocket in self.active_connections:
-            self.active_connections.remove(websocket)
-
-    async def broadcast(self, message: dict, exclude: WebSocket = None):
-        for connection in self.active_connections:
-            if connection != exclude:
-                try:
-                    await connection.send_json(message)
-                except Exception:
-                    pass
-
-manager = ConnectionManager()
-
-@app.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket):
-    await manager.connect(websocket)
-    try:
-        while True:
-            data = await websocket.receive_json()
-            await manager.broadcast(data, exclude=websocket)
-    except WebSocketDisconnect:
-        manager.disconnect(websocket)
-    except Exception:
-        manager.disconnect(websocket)
-
-# =============================================================================
-# События запуска/останова
-# =============================================================================
 @app.on_event("startup")
 async def startup():
     await database.connect()
-    # Автоматически инициализируем структуру БД из schema.sql
-    schema_path = os.path.join(os.path.dirname(__file__), "schema.sql")
+    print("💾 Board Service подключен к PostgreSQL!")
+    
+    # 1. Автоматическая инициализация схемы БД при запуске
+    # schema.sql лежит на один уровень выше (в папке backend/)
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    schema_path = os.path.join(os.path.dirname(current_dir), "schema.sql")
     if os.path.exists(schema_path):
         try:
             with open(schema_path, "r", encoding="utf-8") as f:
@@ -83,9 +47,26 @@ async def startup():
             print(f"⚠️ Не удалось инициализировать схему БД: {e}")
             traceback.print_exc()
 
+    # 2. Инициализация Kafka
+    global producer
+    if KAFKA_BOOTSTRAP_SERVERS:
+        try:
+            from aiokafka import AIOKafkaProducer
+            producer = AIOKafkaProducer(
+                bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS,
+                value_serializer=lambda v: json.dumps(v).encode("utf-8")
+            )
+            await producer.start()
+            print(f"⚡ Kafka Producer запущен (брокер: {KAFKA_BOOTSTRAP_SERVERS})")
+        except Exception as e:
+            print(f"⚠️ Не удалось подключить Kafka Producer: {e}")
+
 @app.on_event("shutdown")
 async def shutdown():
     await database.disconnect()
+    global producer
+    if producer:
+        await producer.stop()
 
 # =============================================================================
 # Вспомогательные функции
@@ -104,23 +85,22 @@ def parse_datetime(val) -> Optional[datetime]:
                 return datetime.strptime(val_str, "%Y-%m-%d")
     except Exception:
         pass
-    return datetime.utcnow()
+    return None
 
 async def ensure_user_exists(user_id: Optional[str]) -> Optional[str]:
-    if not user_id or user_id.strip() == "":
+    if not user_id or not user_id.strip():
         return None
-    # Проверяем существование пользователя в базе без учёта регистра
     existing = await database.fetch_one(
-        "SELECT user_id FROM user_ WHERE UPPER(user_id) = :uid", {"uid": user_id.upper()}
+        "SELECT user_id FROM user_ WHERE UPPER(user_id) = :uid",
+        {"uid": user_id.upper()}
     )
     if not existing:
-        name = user_id.capitalize()
-        email = f"{user_id.lower()}@example.com"
         await database.execute(
             """INSERT INTO user_ (user_id, user_name, user_email, password_hash)
                VALUES (:uid, :name, :email, :pwd)
                ON CONFLICT (user_id) DO NOTHING""",
-            {"uid": user_id, "name": name, "email": email, "pwd": "pbkdf2:sha256:..."}
+            {"uid": user_id, "name": f"Пользователь {user_id}",
+             "email": f"{user_id}@example.com", "pwd": "pbkdf2:sha256:..."}
         )
         return user_id
     return existing["user_id"]
@@ -139,21 +119,20 @@ async def ensure_tag_state_exists(tag_id: int, state_name: str) -> str:
         )
     return state_name
 
-def _find_column_for_task(columns, task_id):
-    for col in columns:
-        if task_id in col.get("taskIds", []):
-            return col["id"]
+def _find_column_for_task(columns_list: list, task_id: str) -> Optional[str]:
+    for col in columns_list:
+        for tid in col.get("tasks", []):
+            if tid == task_id:
+                return col["id"]
     return None
 
-# =============================================================================
-# Сборка полного состояния (как у фронтенда)
-# =============================================================================
 async def build_full_state() -> dict:
     # Пользователи
-    users = await database.fetch_all(
-        "SELECT user_id AS id, user_name AS name, user_email AS email, password_hash AS password FROM user_"
-    )
-    users_list = [dict(u) for u in users]
+    users = await database.fetch_all("SELECT user_id, user_name, user_email FROM user_")
+    users_list = [
+        {"id": u["user_id"], "name": u["user_name"], "email": u["user_email"]}
+        for u in users
+    ]
 
     # Проекты
     projects_raw = await database.fetch_all("SELECT * FROM project")
@@ -162,7 +141,7 @@ async def build_full_state() -> dict:
         proj_dict = dict(proj)
         pid = proj_dict["project_id"]
 
-        # Колонки и их taskIds
+        # Колонки
         columns_raw = await database.fetch_all(
             "SELECT column_id, column_name, position FROM project_column WHERE project_id = :pid ORDER BY position",
             {"pid": pid}
@@ -170,89 +149,96 @@ async def build_full_state() -> dict:
         columns = []
         for col in columns_raw:
             col_dict = dict(col)
-            col_dict["id"] = col_dict.pop("column_id")
+            cid = col_dict.pop("column_id")
+            col_dict["id"] = cid
             col_dict["name"] = col_dict.pop("column_name")
-            # Достаём задачи, привязанные к этой колонке
-            task_rows = await database.fetch_all(
-                "SELECT task_id FROM task WHERE column_id = :cid ORDER BY task_id",
-                {"cid": col_dict["id"]}
+            
+            # Таски в колонке
+            col_tasks = await database.fetch_all(
+                "SELECT task_id FROM task WHERE column_id = :cid ORDER BY created_at",
+                {"cid": cid}
             )
-            col_dict["taskIds"] = [t["task_id"] for t in task_rows]
+            col_dict["tasks"] = [t["task_id"] for t in col_tasks]
             columns.append(col_dict)
 
-        # Задачи – собираем объект { task_id: task }
+        # Задачи
         tasks_raw = await database.fetch_all(
             "SELECT * FROM task WHERE project_id = :pid", {"pid": pid}
         )
         tasks_dict = {}
-        for task in tasks_raw:
-            task_dict = dict(task)
-            tid = task_dict.pop("task_id")
-            # Переименовываем поля под фронтенд
-            task_dict["id"] = tid
-            task_dict["title"] = task_dict.pop("task_title")
+        for t in tasks_raw:
+            t_dict = dict(t)
+            tid = t_dict.pop("task_id")
+            task_item = {
+                "id": tid,
+                "title": t_dict.pop("task_title"),
+                "description": t_dict.pop("description", ""),
+                "columnId": t_dict.pop("column_id"),
+                "assignedTo": t_dict.pop("creator_id"),
+                "priority": t_dict.pop("priority", "Средний"),
+                "completed": t_dict.pop("completed", False),
+                "task_color": t_dict.pop("task_color"),
+                "estimate": t_dict.pop("estimate"),
+                "sprint": t_dict.pop("sprint")
+            }
 
-            creator_id = task_dict.pop("creator_id", None)
-            task_dict["assignedTo"] = creator_id or ""
+            t_created_at = t_dict.pop("created_at", None)
+            if isinstance(t_created_at, datetime):
+                task_item["createdAt"] = t_created_at.isoformat()
+            elif t_created_at:
+                task_item["createdAt"] = str(t_created_at)
+            else:
+                task_item["createdAt"] = ""
 
-            # Исполнители
+            deadline = t_dict.pop("deadline", None)
+            if isinstance(deadline, datetime):
+                task_item["deadline"] = deadline.isoformat()
+            elif deadline:
+                task_item["deadline"] = str(deadline)
+            else:
+                task_item["deadline"] = ""
+
+            # Исполнители (для совместимости)
             performers = await database.fetch_all(
-                "SELECT performer_id FROM task_performer WHERE task_id = :tid", {"tid": tid}
+                "SELECT performer_id FROM task_performer WHERE task_id = :tid",
+                {"tid": tid}
             )
             if performers:
-                task_dict["assignedTo"] = performers[0]["performer_id"]
-            else:
-                task_dict["assignedTo"] = creator_id or ""
+                task_item["assignedTo"] = performers[0]["performer_id"]
 
             # Теги задачи
-            tag_rows = await database.fetch_all(
-                """SELECT t.tag_name FROM task_tag tt JOIN tag t ON tt.tag_id = t.tag_id
+            tags_raw = await database.fetch_all(
+                """SELECT t.tag_name FROM tag t
+                   JOIN task_tag tt ON t.tag_id = tt.tag_id
                    WHERE tt.task_id = :tid""",
                 {"tid": tid}
             )
-            task_dict["tags"] = [t["tag_name"] for t in tag_rows]
+            task_item["tags"] = [tg["tag_name"] for tg in tags_raw]
 
             # Комментарии
             comments_raw = await database.fetch_all(
-                "SELECT comment_id, author_id, text, created_at FROM task_comments WHERE task_id = :tid",
+                "SELECT comment_id, author_id, text, created_at FROM task_comments WHERE task_id = :tid ORDER BY created_at DESC",
                 {"tid": tid}
             )
             comments = []
             for c in comments_raw:
                 c_dict = dict(c)
-                c_dict["id"] = c_dict.pop("comment_id")
-                c_dict["authorId"] = c_dict.pop("author_id")
-
+                comment_item = {
+                    "id": c_dict.pop("comment_id"),
+                    "authorId": c_dict.pop("author_id"),
+                    "text": c_dict.pop("text"),
+                    "isComment": True
+                }
                 c_created_at = c_dict.pop("created_at", None)
                 if isinstance(c_created_at, datetime):
-                    c_dict["createdAt"] = c_created_at.isoformat()
+                    comment_item["createdAt"] = c_created_at.isoformat()
                 elif c_created_at:
-                    c_dict["createdAt"] = str(c_created_at)
+                    comment_item["createdAt"] = str(c_created_at)
                 else:
-                    c_dict["createdAt"] = ""
-                comments.append(c_dict)
-            task_dict["comments"] = comments
-
-            # Даты
-            created_at = task_dict.pop("created_at", None)
-            if isinstance(created_at, datetime):
-                task_dict["createdAt"] = created_at.isoformat()
-            elif created_at:
-                task_dict["createdAt"] = str(created_at)
-            else:
-                task_dict["createdAt"] = datetime.utcnow().isoformat()
-
-            deadline = task_dict.pop("deadline", None)
-            if isinstance(deadline, datetime):
-                task_dict["deadline"] = deadline.isoformat()
-            elif deadline:
-                task_dict["deadline"] = str(deadline)
-            else:
-                task_dict["deadline"] = ""
-
-            task_dict["completed"] = task_dict.get("completed", False)
-            task_dict["columnId"] = task_dict.pop("column_id", None)
-            tasks_dict[tid] = task_dict
+                    comment_item["createdAt"] = ""
+                comments.append(comment_item)
+            task_item["comments"] = comments
+            tasks_dict[tid] = task_item
 
         # Участники проекта
         members = await database.fetch_all(
@@ -300,7 +286,6 @@ async def build_full_state() -> dict:
         chat_dict = dict(chat)
         cid = chat_dict.pop("chat_id")
         chat_dict["id"] = cid
-        # Определяем тип чата
         if chat_dict.get("task_id"):
             chat_dict["type"] = "task"
             chat_dict["taskId"] = chat_dict.pop("task_id")
@@ -327,13 +312,12 @@ async def build_full_state() -> dict:
         else:
             chat_dict.pop("task_id", None)
             chat_dict.pop("project_id", None)
-            # По количеству участников
             members_count = await database.fetch_val(
                 "SELECT COUNT(*) FROM chat_member WHERE chat_id = :cid", {"cid": cid}
             )
             chat_dict["type"] = "personal" if members_count == 2 else "group"
 
-        # Участники
+        # Участники чата
         members = await database.fetch_all(
             "SELECT user_id FROM chat_member WHERE chat_id = :cid", {"cid": cid}
         )
@@ -379,7 +363,6 @@ async def get_all_invitations():
         inv_dict = dict(inv)
         inv_dict["id"] = inv_dict.pop("invite_id")
         inv_dict["projectId"] = inv_dict.pop("project_id")
-        # Получаем имя проекта
         proj = await database.fetch_one("SELECT project_name FROM project WHERE project_id = :pid", {"pid": inv_dict["projectId"]})
         inv_dict["projectName"] = proj["project_name"] if proj else "Неизвестный проект"
         inv_dict["invitedBy"] = inv_dict.pop("invited_by")
@@ -396,9 +379,6 @@ async def get_all_invitations():
         result.append(inv_dict)
     return result
 
-# =============================================================================
-# Сохранение состояния (частичная перезапись)
-# =============================================================================
 async def save_full_state(data: dict):
     async with database.transaction():
         # 1. Пользователи
@@ -435,9 +415,8 @@ async def save_full_state(data: dict):
                      "role": inv.get("role", "member"), "cat": parse_datetime(inv.get("created_at"))}
                 )
 
-        # 3. Проекты (при наличии)
+        # 3. Проекты
         if "projects" in data:
-            # Удаляем связанные данные
             await database.execute("DELETE FROM task_comments WHERE task_id IN (SELECT task_id FROM task WHERE project_id IN (SELECT project_id FROM project))")
             await database.execute("DELETE FROM task_tag WHERE task_id IN (SELECT task_id FROM task WHERE project_id IN (SELECT project_id FROM project))")
             await database.execute("DELETE FROM task_performer WHERE task_id IN (SELECT task_id FROM task WHERE project_id IN (SELECT project_id FROM project))")
@@ -471,7 +450,7 @@ async def save_full_state(data: dict):
                         {"cid": col["id"], "pid": pid, "cname": col["name"], "pos": col.get("position", 0)}
                     )
 
-                # Задачи (из объекта tasks)
+                # Задачи
                 tasks = proj.get("tasks", {})
                 for tid, task in tasks.items():
                     assigned_to = task.get("assignedTo")
@@ -495,14 +474,12 @@ async def save_full_state(data: dict):
                          "completed": task.get("completed", False), "color": task.get("task_color")}
                     )
 
-                    # Исполнители
                     if assigned_to:
                         await database.execute(
                             "INSERT INTO task_performer (task_id, performer_id) VALUES (:tid, :pid) ON CONFLICT DO NOTHING",
                             {"tid": tid, "pid": assigned_to}
                         )
 
-                    # Теги задачи
                     for tag_name in task.get("tags", []):
                         tag = await database.fetch_one("SELECT tag_id FROM tag WHERE tag_name = :tname", {"tname": tag_name})
                         if not tag:
@@ -520,7 +497,6 @@ async def save_full_state(data: dict):
                             {"tid": tid, "tag": tag_id, "state": "default"}
                         )
 
-                    # Комментарии
                     for comment in task.get("comments", []):
                         author_id = comment.get("authorId")
                         author_id = await ensure_user_exists(author_id)
@@ -543,7 +519,7 @@ async def save_full_state(data: dict):
                             {"pid": pid, "uid": m_id, "role": member.get("role", "member")}
                         )
 
-        # 4. Чаты (если есть)
+        # 4. Чаты
         if "chats" in data:
             await database.execute("DELETE FROM message")
             await database.execute("DELETE FROM chat_member")
@@ -597,61 +573,17 @@ async def get_all_data():
 async def sync_data(data: dict = Body(...)):
     try:
         await save_full_state(data)
-        await manager.broadcast({"event": "state_synced"})
+        
+        # 📣 Отправляем событие в Kafka!
+        global producer
+        if producer:
+            try:
+                await producer.send_and_wait("board-updates", {"event": "state_synced"})
+                print("📣 Событие state_synced отправлено в Kafka!")
+            except Exception as ke:
+                print(f"⚠️ Не удалось отправить событие в Kafka: {ke}")
+                
         return {"status": "success", "message": "State synchronized successfully"}
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Sync failed: {str(e)}")
-
-@app.get("/api/user/profile")
-async def get_user_profile(userId: str = None):
-    if userId:
-        user = await database.fetch_one(
-            "SELECT user_name, user_email FROM user_ WHERE UPPER(user_id) = :uid",
-            {"uid": userId.upper()}
-        )
-        if user:
-            return {"displayName": user["user_name"], "email": user["user_email"]}
-    first = await database.fetch_one("SELECT user_name, user_email FROM user_ LIMIT 1")
-    if first:
-        return {"displayName": first["user_name"], "email": first["user_email"]}
-    return {"displayName": "Алексей Смирнов", "email": "alex@example.com"}
-
-@app.post("/api/user/profile")
-async def update_user_profile(data: dict = Body(...)):
-    user_id = data.get("userId", "shaber")
-    display_name = data["displayName"]
-    email = data["email"]
-    existing = await database.fetch_one(
-        "SELECT user_id FROM user_ WHERE UPPER(user_id) = :uid", {"uid": user_id.upper()}
-    )
-    if existing:
-        matched_id = existing["user_id"]
-        await database.execute(
-            "UPDATE user_ SET user_name = :name, user_email = :email WHERE user_id = :uid",
-            {"name": display_name, "email": email, "uid": matched_id}
-        )
-    else:
-        await database.execute(
-            """INSERT INTO user_ (user_id, user_name, user_email, password_hash)
-               VALUES (:uid, :name, :email, :pwd)
-               ON CONFLICT (user_id) DO UPDATE SET
-                   user_name = EXCLUDED.user_name,
-                   user_email = EXCLUDED.user_email""",
-            {"uid": user_id, "name": display_name, "email": email, "pwd": "pbkdf2:sha256:..."}
-        )
-    return {"status": "success", "message": "Profile updated successfully"}
-
-@app.post("/api/auth/send-code")
-async def send_verification_code(data: dict = Body(...)):
-    email = data.get("email")
-    code = data.get("code")
-    name = data.get("name", "Пользователь")
-    if not email or not code:
-        return {"status": "error", "message": "Email and code are required"}
-    print("\n" + "═"*60)
-    print(f"📧 [EMAIL VERIFICATION CODE] ДЛЯ: {name} ({email})")
-    print("═"*60)
-    print(f"👉   ВАШ КОД ПОДТВЕРЖДЕНИЯ:  {code}  👈")
-    print("═"*60 + "\n")
-    return {"status": "success", "message": f"Verification code sent to {email}"}

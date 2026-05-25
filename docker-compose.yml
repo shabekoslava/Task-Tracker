@@ -1,0 +1,122 @@
+version: '3.8'
+
+services:
+  # 💾 База данных PostgreSQL
+  postgres:
+    image: postgres:15-alpine
+    container_name: task_tracker_db
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-Slava2005}
+      POSTGRES_DB: task_tracker_bd
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks:
+      - task_tracker_network
+
+  # 🎼 Zookeeper (координатор для Kafka)
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.3.0
+    container_name: task_tracker_zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    networks:
+      - task_tracker_network
+
+  # 🚀 Брокер сообщений Apache Kafka
+  kafka:
+    image: confluentinc/cp-kafka:7.3.0
+    container_name: task_tracker_kafka
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+    networks:
+      - task_tracker_network
+
+  # 🔑 Микросервис 1: Auth & User Service
+  auth-service:
+    build: ./backend
+    container_name: task_tracker_auth
+    restart: always
+    command: uvicorn microservices.auth_service.main:app --host 0.0.0.0 --port 8000
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:${DB_PASSWORD:-Slava2005}@postgres:5432/task_tracker_bd
+    depends_on:
+      - postgres
+    networks:
+      - task_tracker_network
+
+  # 📋 Микросервис 2: Board & Project Service
+  board-service:
+    build: ./backend
+    container_name: task_tracker_board
+    restart: always
+    command: uvicorn microservices.board_service.main:app --host 0.0.0.0 --port 8000
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:${DB_PASSWORD:-Slava2005}@postgres:5432/task_tracker_bd
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+    depends_on:
+      - postgres
+      - kafka
+    networks:
+      - task_tracker_network
+
+  # 💬 Микросервис 3: Chat & WebSocket Service
+  chat-service:
+    build: ./backend
+    container_name: task_tracker_chat
+    restart: always
+    command: uvicorn microservices.chat_ws_service.main:app --host 0.0.0.0 --port 8000
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+    depends_on:
+      - kafka
+    networks:
+      - task_tracker_network
+
+  # 🌐 API Gateway (Nginx шлюз)
+  gateway:
+    image: nginx:stable-alpine
+    container_name: task_tracker_gateway
+    restart: always
+    volumes:
+      - ./backend/microservices/gateway/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    ports:
+      - "8000:80"
+    depends_on:
+      - auth-service
+      - board-service
+      - chat-service
+    networks:
+      - task_tracker_network
+
+  # 💻 Фронтенд (React / Vite)
+  frontend:
+    build: ./frontend
+    container_name: task_tracker_frontend
+    restart: always
+    ports:
+      - "80:80"
+    depends_on:
+      - gateway
+    networks:
+      - task_tracker_network
+
+volumes:
+  pgdata:
+
+networks:
+  task_tracker_network:
+    driver: bridge
