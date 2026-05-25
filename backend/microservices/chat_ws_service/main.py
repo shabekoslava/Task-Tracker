@@ -70,6 +70,7 @@ async def kafka_consumer_loop():
     
     print(f"🎧 Попытка подключения Kafka Consumer к {KAFKA_BOOTSTRAP_SERVERS}...")
     while True:
+        consumer = None
         try:
             from aiokafka import AIOKafkaConsumer
             consumer = AIOKafkaConsumer(
@@ -77,7 +78,9 @@ async def kafka_consumer_loop():
                 bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS,
                 group_id="chat-ws-group",
                 value_deserializer=lambda v: json.loads(v.decode("utf-8")),
-                auto_offset_reset="latest"
+                auto_offset_reset="latest",
+                request_timeout_ms=10000,
+                session_timeout_ms=10000
             )
             await consumer.start()
             print("⚡ Kafka Consumer успешно запущен и слушает топик board-updates!")
@@ -86,15 +89,19 @@ async def kafka_consumer_loop():
                 async for msg in consumer:
                     event = msg.value
                     print(f"📥 Получено событие из Kafka: {event}")
-                    # Рассылаем всем активным WebSocket-соединениям на этом сервере!
+                    # Рассылаем всем активным WebSocket-соединениям на этом сервере
                     await manager.broadcast(event)
-            except Exception as e:
-                print(f"⚠️ Ошибка во время чтения топика Kafka: {e}")
-            finally:
-                await consumer.stop()
+            except Exception as inner_e:
+                print(f"⚠️ Ошибка во время чтения топика Kafka: {inner_e}")
                 
         except Exception as e:
-            print(f"⚠️ Не удалось подключиться к Kafka (переподключение через 5 секунд...): {e}")
+            print(f"⚠️ Ошибка подключения к Kafka (переподключение через 5 сек): {e}")
+        finally:
+            if consumer:
+                try:
+                    await consumer.stop()
+                except Exception:
+                    pass
             await asyncio.sleep(5)
 
 @app.on_event("startup")

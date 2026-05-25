@@ -139,16 +139,17 @@ async def ensure_tag_state_exists(tag_id: int, state_name: str) -> str:
 
 def _find_column_for_task(columns_list: list, task_id: str) -> Optional[str]:
     for col in columns_list:
-        for tid in col.get("tasks", []):
+        tasks_list = col.get("taskIds", col.get("tasks", []))
+        for tid in tasks_list:
             if tid == task_id:
                 return col["id"]
     return None
 
 async def build_full_state() -> dict:
     # Пользователи
-    users = await database.fetch_all("SELECT user_id, user_name, user_email FROM user_")
+    users = await database.fetch_all("SELECT user_id, user_name, user_email, password_hash FROM user_")
     users_list = [
-        {"id": u["user_id"], "name": u["user_name"], "email": u["user_email"]}
+        {"id": u["user_id"], "name": u["user_name"], "email": u["user_email"], "password": u["password_hash"]}
         for u in users
     ]
 
@@ -176,7 +177,7 @@ async def build_full_state() -> dict:
                 "SELECT task_id FROM task WHERE column_id = :cid ORDER BY created_at",
                 {"cid": cid}
             )
-            col_dict["tasks"] = [t["task_id"] for t in col_tasks]
+            col_dict["taskIds"] = [t["task_id"] for t in col_tasks]
             columns.append(col_dict)
 
         # Задачи
@@ -401,7 +402,6 @@ async def save_full_state(data: dict):
     async with database.transaction():
         # 1. Пользователи
         if "users" in data:
-            await database.execute("DELETE FROM user_")
             for u in data["users"]:
                 uid = u.get("id")
                 if uid and uid.strip():

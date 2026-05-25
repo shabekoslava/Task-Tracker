@@ -23,6 +23,13 @@ export default function Auth({ onLoginSuccess }) {
   const [tempUserData, setTempUserData] = useState(null);
   const [isResending, setIsResending] = useState(false);
 
+  // 🔑 Password Recovery states
+  const [isRecovering, setIsRecovering] = useState(false);
+  const [recoveryStep, setRecoveryStep] = useState(1); // 1: Email, 2: OTP, 3: New Password
+  const [recoveryEmail, setRecoveryEmail] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmNewPassword, setConfirmNewPassword] = useState("");
+
   // 🔄 Подтягиваем пользователей при открытии страницы авторизации
   useEffect(() => {
     fetch("/api/all_data")
@@ -68,7 +75,7 @@ export default function Auth({ onLoginSuccess }) {
       return;
     }
 
-    // 🔄 Синхронизируем пользователей напрямую из PostgreSQL перед валидацией
+    // 🔄 Синхронизируем ВСЕ данные напрямую из PostgreSQL перед валидацией
     try {
       const res = await fetch("/api/all_data");
       if (res.ok) {
@@ -76,9 +83,18 @@ export default function Auth({ onLoginSuccess }) {
         if (data.users && data.users.length > 0) {
           localStorage.setItem("auth_users", JSON.stringify(data.users));
         }
+        if (data.projects) {
+          localStorage.setItem("project_tracker_projects", JSON.stringify(data.projects));
+        }
+        if (data.chats) {
+          localStorage.setItem("project_tracker_chats", JSON.stringify(data.chats));
+        }
+        if (data.invitations) {
+          localStorage.setItem("project_invitations", JSON.stringify(data.invitations));
+        }
       }
     } catch (err) {
-      console.log("Auth: Не удалось подтянуть свежих пользователей с бэкенда:", err.message);
+      console.log("Auth: Не удалось подтянуть свежие данные с бэкенда:", err.message);
     }
 
     const users = getRegisteredUsers();
@@ -259,6 +275,88 @@ export default function Auth({ onLoginSuccess }) {
       });
   };
 
+  // --- Password Recovery Handlers ---
+  const handleRecoveryRequest = (e) => {
+    e.preventDefault();
+    setError("");
+    const email = recoveryEmail.trim();
+    if (!email) {
+      setError("Введите вашу электронную почту");
+      return;
+    }
+
+    const users = getRegisteredUsers();
+    const matchedUser = users.find((u) => u.email.toLowerCase() === email.toLowerCase());
+    
+    if (!matchedUser) {
+      setError("Аккаунт с такой электронной почтой не найден");
+      return;
+    }
+
+    const code = String(Math.floor(100000 + Math.random() * 900000));
+    setGeneratedOtp(code);
+    setTempUserData(matchedUser);
+
+    fetch("/api/auth/send-code", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, code, name: matchedUser.name }),
+    })
+      .then(() => {
+        setRecoveryStep(2);
+        setUserOtpInput("");
+        alert(`На вашу почту ${email} отправлен код для восстановления пароля.`);
+      })
+      .catch(() => {
+        setRecoveryStep(2);
+        setUserOtpInput("");
+        alert(`[Offline Mode] Код для восстановления: ${code}`);
+      });
+  };
+
+  const handleVerifyRecoveryOtp = (e) => {
+    e.preventDefault();
+    setError("");
+    if (userOtpInput !== generatedOtp) {
+      setError("Неверный код подтверждения.");
+      return;
+    }
+    setRecoveryStep(3);
+  };
+
+  const handleResetPassword = (e) => {
+    e.preventDefault();
+    setError("");
+    if (newPassword !== confirmNewPassword) {
+      setError("Пароли не совпадают");
+      return;
+    }
+    if (newPassword.length < 3) {
+      setError("Пароль слишком короткий");
+      return;
+    }
+
+    const users = getRegisteredUsers();
+    const updatedUsers = users.map(u => 
+      u.id === tempUserData.id ? { ...u, password: newPassword } : u
+    );
+    
+    localStorage.setItem("auth_users", JSON.stringify(updatedUsers));
+    
+    // Фоновая синхронизация изменения пароля с сервером
+    fetch("/api/sync", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ users: updatedUsers }),
+    }).catch(console.error);
+
+    alert("Ваш пароль был успешно изменен! Теперь вы можете войти.");
+    setIsRecovering(false);
+    setIsLogin(true);
+    setLoginIdOrEmail(tempUserData.email);
+    setLoginPassword("");
+  };
+
   return (
     <div className="auth-background-wrapper">
       <div className="auth-background-shapes">
@@ -273,24 +371,108 @@ export default function Auth({ onLoginSuccess }) {
             <span className="auth-logo-text">Task Tracker</span>
           </div>
           <h2>
-            {isVerifying 
-              ? "Подтверждение почты" 
-              : isLogin 
-                ? "Добро пожаловать!" 
-                : "Создать аккаунт"}
+            {isRecovering
+              ? "Восстановление пароля"
+              : isVerifying 
+                ? "Подтверждение почты" 
+                : isLogin 
+                  ? "Добро пожаловать!" 
+                  : "Создать аккаунт"}
           </h2>
           <p className="auth-subtitle">
-            {isVerifying 
-              ? `Мы отправили 6-значный код подтверждения на ${tempUserData?.email}. Проверьте консоль бэкенда.`
-              : isLogin 
-                ? "Введите свои учетные данные для доступа к доске" 
-                : "Заполните форму, чтобы начать работу с проектами"}
+            {isRecovering
+              ? recoveryStep === 1 
+                ? "Введите email для сброса пароля"
+                : recoveryStep === 2
+                  ? `Мы отправили код на ${tempUserData?.email}`
+                  : "Придумайте новый надежный пароль"
+              : isVerifying 
+                ? `Мы отправили 6-значный код подтверждения на ${tempUserData?.email}. Проверьте консоль бэкенда.`
+                : isLogin 
+                  ? "Введите свои учетные данные для доступа к доске" 
+                  : "Заполните форму, чтобы начать работу с проектами"}
           </p>
         </div>
 
         {error && <div className="auth-error-box">{error}</div>}
 
-        {isVerifying ? (
+        {isRecovering ? (
+          recoveryStep === 1 ? (
+            <form className="auth-form" onSubmit={handleRecoveryRequest}>
+              <div className="auth-field">
+                <label htmlFor="rec-email">Электронная почта</label>
+                <input
+                  id="rec-email"
+                  type="email"
+                  value={recoveryEmail}
+                  onChange={(e) => setRecoveryEmail(e.target.value)}
+                  placeholder="Ваш зарегистрированный email"
+                  required
+                />
+              </div>
+              <button type="submit" className="auth-submit-btn">Отправить код</button>
+              <button 
+                type="button" 
+                className="auth-toggle-link"
+                style={{ marginTop: "12px", background: "none", border: "none", cursor: "pointer", display: "block", width: "100%", textAlign: "center" }}
+                onClick={() => { setIsRecovering(false); setError(""); }}
+              >
+                Вернуться ко входу
+              </button>
+            </form>
+          ) : recoveryStep === 2 ? (
+            <form className="auth-form" onSubmit={handleVerifyRecoveryOtp}>
+              <div className="auth-field">
+                <label htmlFor="rec-otp">Код подтверждения</label>
+                <input
+                  id="rec-otp"
+                  type="text"
+                  maxLength={6}
+                  value={userOtpInput}
+                  onChange={(e) => setUserOtpInput(e.target.value.replace(/\D/g, ""))}
+                  placeholder="000000"
+                  style={{ textAlign: "center", letterSpacing: "8px", fontSize: "20px", fontWeight: "bold" }}
+                  required
+                />
+              </div>
+              <button type="submit" className="auth-submit-btn">Подтвердить код</button>
+              <button 
+                type="button" 
+                className="auth-toggle-link"
+                style={{ marginTop: "12px", background: "none", border: "none", cursor: "pointer", display: "block", width: "100%", textAlign: "center" }}
+                onClick={() => { setRecoveryStep(1); setError(""); }}
+              >
+                Вернуться назад
+              </button>
+            </form>
+          ) : (
+            <form className="auth-form" onSubmit={handleResetPassword}>
+              <div className="auth-field">
+                <label htmlFor="rec-pass">Новый пароль</label>
+                <input
+                  id="rec-pass"
+                  type="password"
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  placeholder="Придумайте новый пароль"
+                  required
+                />
+              </div>
+              <div className="auth-field">
+                <label htmlFor="rec-pass-conf">Подтверждение пароля</label>
+                <input
+                  id="rec-pass-conf"
+                  type="password"
+                  value={confirmNewPassword}
+                  onChange={(e) => setConfirmNewPassword(e.target.value)}
+                  placeholder="Повторите новый пароль"
+                  required
+                />
+              </div>
+              <button type="submit" className="auth-submit-btn">Сохранить пароль</button>
+            </form>
+          )
+        ) : isVerifying ? (
           <form className="auth-form" onSubmit={handleVerifyOtpSubmit}>
             <div className="auth-field">
               <label htmlFor="reg-otp">Код подтверждения</label>
@@ -367,6 +549,20 @@ export default function Auth({ onLoginSuccess }) {
             <button type="submit" className="auth-submit-btn">
               Войти в систему
             </button>
+            <div style={{ textAlign: "center", marginTop: "15px" }}>
+              <button 
+                type="button" 
+                className="auth-toggle-link"
+                onClick={() => {
+                  setIsRecovering(true);
+                  setRecoveryStep(1);
+                  setRecoveryEmail(loginIdOrEmail.includes("@") ? loginIdOrEmail : "");
+                  setError("");
+                }}
+              >
+                Забыли пароль?
+              </button>
+            </div>
           </form>
         ) : (
           <form className="auth-form" onSubmit={handleRegisterSubmit}>
@@ -424,7 +620,7 @@ export default function Auth({ onLoginSuccess }) {
           </form>
         )}
 
-        {!isVerifying && (
+        {!isVerifying && !isRecovering && (
           <div className="auth-footer-toggle">
             <span>
               {isLogin ? "Еще нет аккаунта?" : "Уже зарегистрированы?"}
