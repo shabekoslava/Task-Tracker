@@ -86,6 +86,9 @@ export default function App() {
                   localStorage.setItem("project_invitations", JSON.stringify(freshData.invitations));
                   setInvitations(freshData.invitations);
                 }
+                if (freshData.users && freshData.users.length > 0) {
+                  localStorage.setItem("auth_users", JSON.stringify(freshData.users));
+                }
               })
               .catch((err) => console.error("Error fetching fresh data after sync event:", err));
           } else if (data.type === "SYNC_STATE") {
