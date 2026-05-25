@@ -486,6 +486,34 @@ export default function App() {
     return true;
   };
 
+  const sendInvitation = (projectId, userId, role = "member") => {
+    const trimmed = userId.trim();
+    if (!trimmed) return false;
+
+    const project = projects.find((p) => p.id === projectId);
+    if (!project) return false;
+
+    if (project.members.some((m) => m.id === trimmed)) {
+      alert("Пользователь уже состоит в этом проекте!");
+      return false;
+    }
+
+    const newInvite = {
+      id: `inv-${Date.now()}`,
+      projectId: projectId,
+      projectName: project.name,
+      invitedBy: currentUserId,
+      invitedUser: trimmed,
+      role: role,
+      status: "pending",
+      created_at: new Date().toISOString(),
+    };
+
+    setInvitations((prev) => [...prev, newInvite]);
+    alert("Приглашение успешно отправлено!");
+    return true;
+  };
+
   const changeUserRole = (projectId, userId, newRole) => {
     setProjects((prev) =>
       prev.map((project) => {
@@ -740,6 +768,7 @@ export default function App() {
                   id: `comment-${Date.now()}`,
                   text: trimmed,
                   createdAt: new Date().toISOString(),
+                  authorId: currentUserId,
                 },
               ],
             },
@@ -858,7 +887,7 @@ export default function App() {
           onToggleTaskComplete={toggleTaskComplete}
           onMoveTask={moveTask}
           onEditProject={editProject}
-          onInviteUser={inviteUser}
+          onInviteUser={sendInvitation}
           onChangeRole={changeUserRole}
           onLeaveProject={leaveProject}
           onDeleteProject={deleteProject}
@@ -885,7 +914,7 @@ export default function App() {
             Array.isArray(p.members) && p.members.some((m) => m.id === currentUserId),
           )}
           onCreateProject={createProject}
-          onInviteUser={inviteUser}
+          onInviteUser={sendInvitation}
           onChangeRole={changeUserRole}
           onLeaveProject={leaveProject}
           onDeleteProject={deleteProject}

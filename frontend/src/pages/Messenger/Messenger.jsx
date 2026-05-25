@@ -37,15 +37,57 @@ export default function Messenger({
   // Consumer-focused notification states
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [visualAlerts, setVisualAlerts] = useState(true);
-  const [recentNotifications, setRecentNotifications] = useState([
-    {
-      id: "not-init",
-      date: new Date().toLocaleDateString([], { day: "2-digit", month: "2-digit" }),
-      time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-      title: "Система уведомлений",
-      text: "Здесь будут отображаться ваши входящие упоминания в реальном времени.",
+  const [recentNotifications, setRecentNotifications] = useState(() => {
+    return JSON.parse(localStorage.getItem("messenger_notifications") || "[]");
+  });
+
+  const [lastRead, setLastRead] = useState(() => {
+    return JSON.parse(localStorage.getItem("messenger_last_read") || "{}");
+  });
+
+  useEffect(() => {
+    if (activeRoomId) {
+      setLastRead((prev) => {
+        const next = { ...prev, [activeRoomId]: new Date().toISOString() };
+        localStorage.setItem("messenger_last_read", JSON.stringify(next));
+        return next;
+      });
     }
-  ]);
+  }, [activeRoomId, chats]);
+
+  // Handle incoming new messages for notifications
+  useEffect(() => {
+    if (chats.length === 0) return;
+    const latestMsgs = [];
+    chats.forEach(c => {
+      if (c.messages && c.messages.length > 0) {
+        const lastMsg = c.messages[c.messages.length - 1];
+        if (lastMsg.authorId !== currentUserId && lastMsg.authorId !== "System") {
+          const roomRead = lastRead[c.id];
+          if (!roomRead || new Date(lastMsg.createdAt) > new Date(roomRead)) {
+            latestMsgs.push({ room: c, msg: lastMsg });
+          }
+        }
+      }
+    });
+
+    if (latestMsgs.length > 0) {
+      const newNotifs = latestMsgs.map(item => ({
+        id: item.msg.id,
+        date: new Date(item.msg.createdAt).toLocaleDateString([], { day: "2-digit", month: "2-digit" }),
+        time: new Date(item.msg.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+        title: `Новое сообщение: ${item.room.name || "Чат"}`,
+        text: item.msg.text,
+      }));
+      
+      setRecentNotifications(prev => {
+        const combined = [...newNotifs, ...prev].filter((v, i, a) => a.findIndex(t => t.id === v.id) === i);
+        const limited = combined.slice(0, 20);
+        localStorage.setItem("messenger_notifications", JSON.stringify(limited));
+        return limited;
+      });
+    }
+  }, [chats]);
 
   const messagesEndRef = useRef(null);
 
@@ -99,6 +141,23 @@ export default function Messenger({
     }
   };
 
+  // Helper functions
+  const getUserName = (userId) => {
+    if (userId === "System") return "Система";
+    if (userId === currentUserId) return "Вы";
+    const found = allRegisteredUsers.find((u) => u.id === userId);
+    if (found) return found.name;
+    if (userId === "alex") return "Алексей Смирнов";
+    if (userId === "dmitry") return "Дмитрий Иванов";
+    if (userId === "elena") return "Елена Кузнецова";
+    return userId;
+  };
+
+  const getUserAvatar = (userId) => {
+    const found = allRegisteredUsers.find((u) => u.id === userId);
+    return found ? found.avatar : null;
+  };
+
   // --- Dynamic Chat Rooms Construction ---
   const dynamicRooms = [];
 
@@ -119,6 +178,15 @@ export default function Messenger({
     const tasksObj = (project.tasks && typeof project.tasks === 'object' && !Array.isArray(project.tasks)) ? project.tasks : {};
     Object.values(tasksObj).forEach((task) => {
       if (task.assignedTo === currentUserId) {
+        const taskMessages = (task.comments || []).map((c) => ({
+          id: c.id,
+          text: c.text,
+          createdAt: c.createdAt || new Date().toISOString(),
+          authorId: c.authorId || currentUserId,
+          status: "read",
+          isComment: true,
+        }));
+
         dynamicRooms.push({
           id: `task-chat-${task.id}`,
           name: `📅 Задача: ${task.title}`,
@@ -127,7 +195,7 @@ export default function Messenger({
           taskId: task.id,
           taskName: task.title,
           members: [currentUserId],
-          messages: [],
+          messages: taskMessages,
         });
       }
     });
@@ -152,14 +220,28 @@ export default function Messenger({
           ...(existingRoom.messages || []),
           ...(storedRoom.messages || []),
         ].reduce((acc, current) => {
-          if (!acc.some((m) => m.id === current.id)) {
+          if (!current) return acc;
+          if (!acc.some((m) => m && m.id === current.id)) {
             acc.push(current);
           }
           return acc;
         }, []),
       });
     } else {
-      uniqueRoomsMap.set(storedRoom.id, storedRoom);
+      // Generate missing names for backend-synced personal/group chats
+      let roomName = storedRoom.name;
+      if (!roomName) {
+        if (storedRoom.type === "personal") {
+          const otherId = Array.isArray(storedRoom.members) ? storedRoom.members.find(m => m !== currentUserId) : null;
+          roomName = `👤 ${getUserName(otherId)}`;
+        } else if (storedRoom.type === "group") {
+          const names = Array.isArray(storedRoom.members) ? storedRoom.members.filter(m => m !== currentUserId).map(getUserName).join(", ") : "Группа";
+          roomName = `👥 ${names || "Группа"}`;
+        } else {
+          roomName = "Чат";
+        }
+      }
+      uniqueRoomsMap.set(storedRoom.id, { ...storedRoom, name: roomName });
     }
   });
 
@@ -196,7 +278,7 @@ export default function Messenger({
         id: c.id,
         text: c.text,
         createdAt: c.createdAt || new Date().toISOString(),
-        authorId: c.authorId || "alex",
+        authorId: c.authorId || currentUserId,
         status: "read",
         isComment: true,
       }));
@@ -229,7 +311,7 @@ export default function Messenger({
       text: trimmedMsg,
       createdAt: timestamp,
       authorId: currentUserId,
-      status: "delivered",
+      status: "read", // Assume read for local optimistic UI until backend supports receipts
     };
 
     if (activeRoom.type === "task") {
@@ -358,15 +440,14 @@ export default function Messenger({
     }
   };
 
-  const getUserName = (userId) => {
-    if (userId === "System") return "Система";
-    if (userId === currentUserId) return "Вы";
-    const found = allRegisteredUsers.find((u) => u.id === userId);
-    if (found) return found.name;
-    if (userId === "alex") return "Алексей Смирнов";
-    if (userId === "dmitry") return "Дмитрий Иванов";
-    if (userId === "elena") return "Елена Кузнецова";
-    return userId;
+  const hasUnread = (room) => {
+    if (room.id === activeRoomId) return false;
+    if (!room.messages || room.messages.length === 0) return false;
+    const lastMsg = room.messages[room.messages.length - 1];
+    if (lastMsg.authorId === currentUserId) return false;
+    const readAt = lastRead[room.id];
+    if (!readAt) return true;
+    return new Date(lastMsg.createdAt) > new Date(readAt);
   };
 
   return (
@@ -415,7 +496,10 @@ export default function Messenger({
                     onClick={() => setActiveRoomId(room.id)}
                   >
                     <span className="room-icon-tag">👤</span>
-                    <span className="room-name-text">{room.name.replace("👤 ", "")}</span>
+                    <span className="room-name-text" style={{ fontWeight: hasUnread(room) ? "bold" : "normal" }}>
+                      {room.name.replace("👤 ", "")}
+                    </span>
+                    {hasUnread(room) && <div style={{ width: 8, height: 8, borderRadius: "50%", background: "red", marginLeft: "auto" }} />}
                   </button>
                 ))}
               </div>
@@ -441,7 +525,10 @@ export default function Messenger({
                     onClick={() => setActiveRoomId(room.id)}
                   >
                     <span className="room-icon-tag">👥</span>
-                    <span className="room-name-text">{room.name.replace("👥 ", "")}</span>
+                    <span className="room-name-text" style={{ fontWeight: hasUnread(room) ? "bold" : "normal" }}>
+                      {room.name.replace("👥 ", "")}
+                    </span>
+                    {hasUnread(room) && <div style={{ width: 8, height: 8, borderRadius: "50%", background: "red", marginLeft: "auto" }} />}
                   </button>
                 ))}
               </div>
@@ -467,7 +554,10 @@ export default function Messenger({
                     onClick={() => setActiveRoomId(room.id)}
                   >
                     <span className="room-icon-tag">📂</span>
-                    <span className="room-name-text">{room.name.replace("📂 Проект: ", "")}</span>
+                    <span className="room-name-text" style={{ fontWeight: hasUnread(room) ? "bold" : "normal" }}>
+                      {room.name.replace("📂 Проект: ", "")}
+                    </span>
+                    {hasUnread(room) && <div style={{ width: 8, height: 8, borderRadius: "50%", background: "red", marginLeft: "auto" }} />}
                   </button>
                 ))}
               </div>
@@ -505,7 +595,10 @@ export default function Messenger({
                             style={{ paddingLeft: "8px" }}
                           >
                             <span className="room-icon-tag">📅</span>
-                            <span className="room-name-text" style={{ fontSize: "12.5px" }}>{room.taskName}</span>
+                            <span className="room-name-text" style={{ fontSize: "12.5px", fontWeight: hasUnread(room) ? "bold" : "normal" }}>
+                              {room.taskName}
+                            </span>
+                            {hasUnread(room) && <div style={{ width: 8, height: 8, borderRadius: "50%", background: "red", marginLeft: "auto" }} />}
                           </button>
                         ))}
                       </div>
@@ -589,8 +682,12 @@ export default function Messenger({
 
                   return (
                     <div className={`message-bubble-wrapper ${isOwn ? "own-message" : ""}`} key={msg.id}>
-                      <div className="message-avatar-circle">
-                        {getUserName(msg.authorId).charAt(0).toUpperCase()}
+                      <div className="message-avatar-circle" style={{ overflow: "hidden" }}>
+                        {getUserAvatar(msg.authorId) ? (
+                          <img src={getUserAvatar(msg.authorId)} alt="avatar" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                        ) : (
+                          getUserName(msg.authorId).charAt(0).toUpperCase()
+                        )}
                       </div>
                       <div className="message-content-block">
                         <div className="message-bubble-header">

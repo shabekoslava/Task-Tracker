@@ -482,7 +482,7 @@ async def save_full_state(data: dict):
                     assigned_to = task.get("assignedTo")
                     assigned_to = await ensure_user_exists(assigned_to)
 
-                    column_id = task.get("columnId") or _find_column_for_task(proj["columns"], tid)
+                    column_id = _find_column_for_task(proj["columns"], tid) or task.get("columnId")
 
                     await database.execute(
                         """INSERT INTO task (task_id, task_title, description, project_id, column_id,
