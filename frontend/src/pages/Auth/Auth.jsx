@@ -1,5 +1,5 @@
 // src/pages/Auth/Auth.jsx
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import "./Auth.css";
 
 export default function Auth({ onLoginSuccess }) {
@@ -23,6 +23,21 @@ export default function Auth({ onLoginSuccess }) {
   const [tempUserData, setTempUserData] = useState(null);
   const [isResending, setIsResending] = useState(false);
 
+  // 🔄 Подтягиваем пользователей при открытии страницы авторизации
+  useEffect(() => {
+    fetch("/api/all_data")
+      .then((res) => {
+        if (res.ok) return res.json();
+        throw new Error("Offline");
+      })
+      .then((data) => {
+        if (data.users && data.users.length > 0) {
+          localStorage.setItem("auth_users", JSON.stringify(data.users));
+        }
+      })
+      .catch((err) => console.log("Auth Mount: Не удалось подтянуть пользователей:", err.message));
+  }, []);
+
   // Helper: Get all registered users
   const getRegisteredUsers = () => {
     const usersJson = localStorage.getItem("auth_users");
@@ -41,7 +56,7 @@ export default function Auth({ onLoginSuccess }) {
     return JSON.parse(usersJson);
   };
 
-  const handleLoginSubmit = (e) => {
+  const handleLoginSubmit = async (e) => {
     e.preventDefault();
     setError("");
 
@@ -51,6 +66,19 @@ export default function Auth({ onLoginSuccess }) {
     if (!trimmedInput || !password) {
       setError("Пожалуйста, заполните все поля");
       return;
+    }
+
+    // 🔄 Синхронизируем пользователей напрямую из PostgreSQL перед валидацией
+    try {
+      const res = await fetch("/api/all_data");
+      if (res.ok) {
+        const data = await res.json();
+        if (data.users && data.users.length > 0) {
+          localStorage.setItem("auth_users", JSON.stringify(data.users));
+        }
+      }
+    } catch (err) {
+      console.log("Auth: Не удалось подтянуть свежих пользователей с бэкенда:", err.message);
     }
 
     const users = getRegisteredUsers();
