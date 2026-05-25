@@ -187,7 +187,9 @@ export default function App() {
 
     // If this update was triggered by an incoming WebSocket sync, prevent loop
     if (isIncomingSyncRef.current) {
-      isIncomingSyncRef.current = false;
+      setTimeout(() => {
+        isIncomingSyncRef.current = false;
+      }, 100);
       return;
     }
 
@@ -217,6 +219,13 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem("project_invitations", JSON.stringify(invitations));
 
+    if (isIncomingSyncRef.current) {
+      setTimeout(() => {
+        isIncomingSyncRef.current = false;
+      }, 100);
+      return;
+    }
+
     // Background push to backend
     fetch("/api/sync", {
       method: "POST",
@@ -231,6 +240,14 @@ export default function App() {
   useEffect(() => {
     if (currentUser) {
       const users = JSON.parse(localStorage.getItem("auth_users") || "[]");
+      
+      if (isIncomingSyncRef.current) {
+        setTimeout(() => {
+          isIncomingSyncRef.current = false;
+        }, 100);
+        return;
+      }
+
       fetch("/api/sync", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
