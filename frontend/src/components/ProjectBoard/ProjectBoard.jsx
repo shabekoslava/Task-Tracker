@@ -2,7 +2,23 @@
 import { useState, useEffect } from "react";
 import "./ProjectBoard.css";
 
-const Avatar = ({ name }) => {
+const Avatar = ({ name, avatarUrl }) => {
+  if (avatarUrl) {
+    return (
+      <div 
+        className="avatar" 
+        title={name} 
+        style={{ 
+          backgroundImage: `url(${avatarUrl})`, 
+          backgroundSize: 'cover', 
+          backgroundPosition: 'center', 
+          color: 'transparent' 
+        }}
+      >
+      </div>
+    );
+  }
+  
   // Generate initials
   const initials = name
     .split(/[\s-]+/)
@@ -167,6 +183,11 @@ export default function ProjectBoard({
     if (userId === "Unassigned") return "Не назначено";
     const found = allUsers.find((u) => u.id === userId);
     return found ? found.name : userId;
+  };
+  const getUserAvatar = (userId) => {
+    if (!userId || userId === "Unassigned") return null;
+    const found = allUsers.find((u) => u.id === userId);
+    return found ? found.avatar : null;
   };
   const projectTags = project.tags || [
     "дизайн",
@@ -747,7 +768,7 @@ export default function ProjectBoard({
           </span>
           <div className="board-members">
             {members.map((m) => (
-              <Avatar key={m} name={getUserName(m)} />
+              <Avatar key={m} name={getUserName(m)} avatarUrl={getUserAvatar(m)} />
             ))}
           </div>
         </div>
@@ -949,7 +970,7 @@ export default function ProjectBoard({
                           gap: "12px",
                         }}
                       >
-                        <Avatar name={getUserName(m.id)} />
+                        <Avatar name={getUserName(m.id)} avatarUrl={getUserAvatar(m.id)} />
                         <div
                           style={{ display: "flex", flexDirection: "column" }}
                         >
@@ -1568,6 +1589,7 @@ export default function ProjectBoard({
                         </div>
                         <Avatar
                           name={getUserName(task.assignedTo || "Unassigned")}
+                          avatarUrl={getUserAvatar(task.assignedTo || "Unassigned")}
                         />
                       </div>
                     </div>

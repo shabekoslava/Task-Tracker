@@ -331,21 +331,24 @@ export default function App() {
     const registeredUsers = JSON.parse(
       localStorage.getItem("auth_users") || "[]",
     );
-    const recipientExists = registeredUsers.some(
+    const recipientUser = registeredUsers.find(
       (u) => u.id.toUpperCase() === targetUserId.toUpperCase(),
     );
 
-    if (!recipientExists) {
+    if (!recipientUser) {
       return {
         success: false,
         message: `Пользователь с ID ${targetUserId} не зарегистрирован`,
       };
     }
+    
+    // Normalize case to exactly match the database
+    const exactTargetUserId = recipientUser.id;
 
     // Check if target is already in project members
     if (
       targetProject.members.some(
-        (m) => m.id.toUpperCase() === targetUserId.toUpperCase(),
+        (m) => m.id === exactTargetUserId,
       )
     ) {
       return {
@@ -358,7 +361,7 @@ export default function App() {
     const duplicateInvite = invitations.some(
       (inv) =>
         inv.projectId === projectId &&
-        inv.invitedUser.toUpperCase() === targetUserId.toUpperCase() &&
+        inv.invitedUser === exactTargetUserId &&
         inv.status === "pending",
     );
 
@@ -375,7 +378,7 @@ export default function App() {
       projectId,
       projectName: targetProject.name,
       invitedBy: currentUserId,
-      invitedUser: targetUserId,
+      invitedUser: exactTargetUserId,
       status: "pending",
       role: role,
     };
@@ -383,7 +386,7 @@ export default function App() {
     setInvitations((prev) => [...prev, newInvite]);
     return {
       success: true,
-      message: `Приглашение успешно отправлено для ${targetUserId}!`,
+      message: `Приглашение успешно отправлено для ${exactTargetUserId}!`,
     };
   };
 
@@ -879,7 +882,7 @@ export default function App() {
       return (
         <MyProjects
           projects={projects.filter((p) =>
-            p.members.some((m) => m.id === currentUserId),
+            Array.isArray(p.members) && p.members.some((m) => m.id === currentUserId),
           )}
           onCreateProject={createProject}
           onInviteUser={inviteUser}

@@ -9,7 +9,14 @@ export default function MyProfile({ userId, onLogout, onProfileUpdate }) {
   const [email, setEmail] = useState("");
   const [editingEmail, setEditingEmail] = useState("");
 
-  const [avatar, setAvatar] = useState(null); // URL или base64 аватарки
+  const [avatar, setAvatar] = useState(() => {
+    const session = localStorage.getItem("active_user_session");
+    if (session) {
+      const parsed = JSON.parse(session);
+      return parsed.avatar || null;
+    }
+    return null;
+  });
 
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
@@ -186,17 +193,77 @@ export default function MyProfile({ userId, onLogout, onProfileUpdate }) {
       alert("Новый пароль и подтверждение не совпадают");
       return;
     }
+    const usersJson = localStorage.getItem("auth_users");
+    if (usersJson) {
+      const users = JSON.parse(usersJson);
+      const user = users.find(u => u.id === userId);
+      
+      if (!user || user.password !== currentPassword) {
+        alert("Текущий пароль введен неверно");
+        return;
+      }
+      
+      const updatedUsers = users.map((u) => 
+        u.id === userId ? { ...u, password: newPassword } : u
+      );
+      localStorage.setItem("auth_users", JSON.stringify(updatedUsers));
+      
+      // Update session as well if password is stored there
+      const session = localStorage.getItem("active_user_session");
+      if (session) {
+        const parsed = JSON.parse(session);
+        parsed.password = newPassword;
+        localStorage.setItem("active_user_session", JSON.stringify(parsed));
+      }
+      
+      // Trigger sync
+      fetch("/api/sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ users: updatedUsers }),
+      }).catch(e => console.log(e));
+    }
+    
     setCurrentPassword("");
     setNewPassword("");
     setConfirmPassword("");
-    alert("Пароль изменён (заглушка)");
+    alert("Пароль успешно изменён!");
   }
 
   function handleAvatarChange(event) {
     const file = event.target.files[0];
     if (file) {
       const reader = new FileReader();
-      reader.onload = (e) => setAvatar(e.target.result);
+      reader.onload = (e) => {
+        const base64Avatar = e.target.result;
+        setAvatar(base64Avatar);
+        
+        // Save to active session
+        const session = localStorage.getItem("active_user_session");
+        if (session) {
+          const parsed = JSON.parse(session);
+          parsed.avatar = base64Avatar;
+          localStorage.setItem("active_user_session", JSON.stringify(parsed));
+          if (onProfileUpdate) onProfileUpdate(parsed);
+        }
+        
+        // Save to users DB
+        const usersJson = localStorage.getItem("auth_users");
+        if (usersJson) {
+          const users = JSON.parse(usersJson);
+          const updatedUsers = users.map((u) => 
+            u.id === userId ? { ...u, avatar: base64Avatar } : u
+          );
+          localStorage.setItem("auth_users", JSON.stringify(updatedUsers));
+          
+          // Trigger sync
+          fetch("/api/sync", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ users: updatedUsers }),
+          }).catch(e => console.log(e));
+        }
+      };
       reader.readAsDataURL(file);
     }
   }

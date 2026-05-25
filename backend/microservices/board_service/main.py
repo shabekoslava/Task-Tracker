@@ -65,6 +65,13 @@ async def startup():
             print(f"⚠️ Не удалось инициализировать схему БД: {e}")
             traceback.print_exc()
 
+        # Миграция: добавляем avatar если его нет
+        try:
+            await database.execute("ALTER TABLE user_ ADD COLUMN IF NOT EXISTS avatar TEXT;")
+            print("🚀 Миграция: колонка avatar успешно добавлена (или уже существует).")
+        except Exception as e:
+            print(f"⚠️ Не удалось добавить колонку avatar: {e}")
+
     # 2. Инициализация Kafka
     global producer
     if KAFKA_BOOTSTRAP_SERVERS:
@@ -147,9 +154,9 @@ def _find_column_for_task(columns_list: list, task_id: str) -> Optional[str]:
 
 async def build_full_state() -> dict:
     # Пользователи
-    users = await database.fetch_all("SELECT user_id, user_name, user_email, password_hash FROM user_")
+    users = await database.fetch_all("SELECT user_id, user_name, user_email, password_hash, avatar FROM user_")
     users_list = [
-        {"id": u["user_id"], "name": u["user_name"], "email": u["user_email"], "password": u["password_hash"]}
+        {"id": u["user_id"], "name": u["user_name"], "email": u["user_email"], "password": u["password_hash"], "avatar": u["avatar"]}
         for u in users
     ]
 
@@ -406,14 +413,15 @@ async def save_full_state(data: dict):
                 uid = u.get("id")
                 if uid and uid.strip():
                     await database.execute(
-                        """INSERT INTO user_ (user_id, user_name, user_email, password_hash)
-                           VALUES (:uid, :name, :email, :pwd)
+                        """INSERT INTO user_ (user_id, user_name, user_email, password_hash, avatar)
+                           VALUES (:uid, :name, :email, :pwd, :avatar)
                            ON CONFLICT (user_id) DO UPDATE SET
                                user_name = EXCLUDED.user_name,
                                user_email = EXCLUDED.user_email,
-                               password_hash = EXCLUDED.password_hash""",
+                               password_hash = EXCLUDED.password_hash,
+                               avatar = EXCLUDED.avatar""",
                         {"uid": uid, "name": u.get("name", ""), "email": u.get("email", ""),
-                         "pwd": u.get("password", "pbkdf2:sha256:...")}
+                         "pwd": u.get("password", "pbkdf2:sha256:..."), "avatar": u.get("avatar")}
                     )
 
         # 2. Приглашения

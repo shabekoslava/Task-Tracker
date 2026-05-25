@@ -78,7 +78,7 @@ export default function Sidebar({
           <>
             {(() => {
               const userProjects = projects.filter((project) =>
-                project.members.some((m) => m.id === currentUserId),
+                Array.isArray(project.members) && project.members.some((m) => m.id === currentUserId),
               );
               if (userProjects.length === 0) return null;
               return (

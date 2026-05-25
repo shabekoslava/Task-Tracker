@@ -5,7 +5,8 @@ CREATE TABLE IF NOT EXISTS user_ (
     user_id VARCHAR(20) PRIMARY KEY,
     user_name VARCHAR(100) NOT NULL,
     user_email VARCHAR(100) NOT NULL,
-    password_hash VARCHAR(255) NOT NULL
+    password_hash VARCHAR(255) NOT NULL,
+    avatar TEXT
 );
 
 -- ============================================================

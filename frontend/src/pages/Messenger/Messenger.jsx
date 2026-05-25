@@ -59,7 +59,7 @@ export default function Messenger({
 
   // Filter projects where current user is a member
   const userProjects = projects.filter((p) =>
-    p.members.some((m) => m.id === currentUserId)
+    Array.isArray(p.members) && p.members.some((m) => m.id === currentUserId)
   );
 
   // Extract teammates
@@ -72,14 +72,7 @@ export default function Messenger({
 
   const teammates = allRegisteredUsers.filter((u) => teammateIds.has(u.id));
 
-  // Fallback teammates for empty workspace state
-  const fallbackTeammates = [
-    { id: "alex", name: "Алексей Смирнов", email: "alex@smirnov.ru" },
-    { id: "dmitry", name: "Дмитрий Иванов", email: "dmitry@ivanov.ru" },
-    { id: "elena", name: "Елена Кузнецова", email: "elena@kuznecova.ru" },
-  ];
-
-  const activeTeammates = teammates.length > 0 ? teammates : fallbackTeammates;
+  const activeTeammates = teammates;
 
   // Synthesize soft premium notification audio tone
   const playNotificationSound = () => {
@@ -123,7 +116,8 @@ export default function Messenger({
 
   // 2. Task-level Rooms (Auto-generated per active assigned task)
   userProjects.forEach((project) => {
-    Object.values(project.tasks || {}).forEach((task) => {
+    const tasksObj = (project.tasks && typeof project.tasks === 'object' && !Array.isArray(project.tasks)) ? project.tasks : {};
+    Object.values(tasksObj).forEach((task) => {
       if (task.assignedTo === currentUserId) {
         dynamicRooms.push({
           id: `task-chat-${task.id}`,
@@ -176,9 +170,9 @@ export default function Messenger({
     if (room.type === "project" || room.type === "task") {
       const proj = projects.find((p) => p.id === room.projectId);
       if (!proj) return false;
-      return proj.members.some((m) => m.id === currentUserId);
+      return Array.isArray(proj.members) ? proj.members.some((m) => m.id === currentUserId) : false;
     }
-    return room.members.includes(currentUserId);
+    return Array.isArray(room.members) ? room.members.includes(currentUserId) : false;
   });
 
   const activeRoom = accessibleRooms.find((r) => r.id === activeRoomId);
@@ -335,7 +329,7 @@ export default function Messenger({
         if (r.id !== roomId) return r;
         return {
           ...r,
-          members: r.members.filter((m) => m !== currentUserId),
+          members: Array.isArray(r.members) ? r.members.filter((m) => m !== currentUserId) : [],
         };
       })
     );
