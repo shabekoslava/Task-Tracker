@@ -34,10 +34,23 @@ async def startup():
     print("💾 Board Service подключен к PostgreSQL!")
     
     # 1. Автоматическая инициализация схемы БД при запуске
-    # schema.sql лежит на один уровень выше (в папке backend/)
+    # Ищем schema.sql на два уровня выше (для Docker /app/schema.sql), на один уровень выше или в текущей директории
     current_dir = os.path.dirname(os.path.abspath(__file__))
-    schema_path = os.path.join(os.path.dirname(current_dir), "schema.sql")
-    if os.path.exists(schema_path):
+    possible_paths = [
+        os.path.join(os.path.dirname(os.path.dirname(current_dir)), "schema.sql"),
+        os.path.join(os.path.dirname(current_dir), "schema.sql"),
+        os.path.join(current_dir, "schema.sql"),
+        "schema.sql",
+        "../schema.sql",
+        "../../schema.sql"
+    ]
+    schema_path = None
+    for path in possible_paths:
+        if os.path.exists(path):
+            schema_path = path
+            break
+
+    if schema_path:
         try:
             with open(schema_path, "r", encoding="utf-8") as f:
                 schema_sql = f.read()
