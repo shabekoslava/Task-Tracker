@@ -54,7 +54,12 @@ async def startup():
         try:
             with open(schema_path, "r", encoding="utf-8") as f:
                 schema_sql = f.read()
-            await database.execute(schema_sql)
+            # Разделяем SQL-скрипт по точке с запятой, чтобы выполнять команды по очереди
+            # Это обходит ограничение asyncpg (cannot insert multiple commands into a prepared statement)
+            for command in schema_sql.split(";"):
+                trimmed_cmd = command.strip()
+                if trimmed_cmd:
+                    await database.execute(trimmed_cmd)
             print("🚀 Схема базы данных успешно инициализирована из schema.sql!")
         except Exception as e:
             print(f"⚠️ Не удалось инициализировать схему БД: {e}")
