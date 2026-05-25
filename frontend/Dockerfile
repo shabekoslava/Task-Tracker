@@ -5,7 +5,7 @@ WORKDIR /app
 
 # Копируем файлы зависимостей
 COPY package*.json ./
-RUN npm ci
+RUN npm install
 
 # Копируем код фронтенда и собираем его
 COPY . .
