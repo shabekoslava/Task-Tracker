@@ -64,8 +64,32 @@ export default function App() {
       socket.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
-          if (data.type === "SYNC_STATE") {
-            console.log("⚡ Real-time WebSocket sync update received:", data);
+          
+          if (data.event === "state_synced") {
+            console.log("⚡ Database state synced event received. Fetching fresh data from API...");
+            fetch("/api/all_data")
+              .then((res) => {
+                if (!res.ok) throw new Error("API Offline");
+                return res.json();
+              })
+              .then((freshData) => {
+                isIncomingSyncRef.current = true;
+                if (freshData.projects) {
+                  localStorage.setItem("project_tracker_projects", JSON.stringify(freshData.projects));
+                  setProjects(freshData.projects);
+                }
+                if (freshData.chats) {
+                  localStorage.setItem("project_tracker_chats", JSON.stringify(freshData.chats));
+                  setChats(freshData.chats);
+                }
+                if (freshData.invitations) {
+                  localStorage.setItem("project_invitations", JSON.stringify(freshData.invitations));
+                  setInvitations(freshData.invitations);
+                }
+              })
+              .catch((err) => console.error("Error fetching fresh data after sync event:", err));
+          } else if (data.type === "SYNC_STATE") {
+            console.log("⚡ Real-time WebSocket peer sync update received:", data);
             isIncomingSyncRef.current = true;
             if (data.projects) {
               localStorage.setItem(
@@ -86,6 +110,7 @@ export default function App() {
           console.error("Failed to parse WebSocket sync message:", err);
         }
       };
+
 
       socket.onclose = () => {
         console.log("⚡ WebSocket connection closed. Reconnecting in 3s...");
