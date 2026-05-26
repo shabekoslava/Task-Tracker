@@ -3,3 +3,6 @@ uvicorn[standard]
 databases
 asyncpg
 aiokafka
+bcrypt
+python-jose[cryptography]
+python-dotenv

@@ -6,14 +6,24 @@ from typing import List, Dict, Any, Optional
 from fastapi import FastAPI, Body, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 import databases
+import bcrypt
 from datetime import datetime
 
 DATABASE_URL = os.getenv(
     "DATABASE_URL",
     "postgresql+asyncpg://postgres:Slava2005@localhost:5432/task_tracker_bd"
 )
+PASSWORD_PEPPER = os.getenv("PASSWORD_PEPPER", "")
 
 database = databases.Database(DATABASE_URL)
+
+
+def hash_password(plain_password: str) -> str:
+    """Хешируем пароль bcrypt + pepper."""
+    peppered = plain_password + PASSWORD_PEPPER
+    salt = bcrypt.gensalt(rounds=12)
+    hashed = bcrypt.hashpw(peppered.encode("utf-8"), salt)
+    return hashed.decode("utf-8")
 
 app = FastAPI(title="Board & Project Service")
 
@@ -32,7 +42,7 @@ producer = None
 async def startup():
     await database.connect()
     print("💾 Board Service подключен к PostgreSQL!")
-    
+
     # 1. Автоматическая инициализация схемы БД при запуске
     # Ищем schema.sql на два уровня выше (для Docker /app/schema.sql), на один уровень выше или в текущей директории
     current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -120,12 +130,13 @@ async def ensure_user_exists(user_id: Optional[str]) -> Optional[str]:
         {"uid": user_id.upper()}
     )
     if not existing:
+        temp_hash = hash_password("temp_password")
         await database.execute(
             """INSERT INTO user_ (user_id, user_name, user_email, password_hash)
                VALUES (:uid, :name, :email, :pwd)
                ON CONFLICT (user_id) DO NOTHING""",
             {"uid": user_id, "name": f"Пользователь {user_id}",
-             "email": f"{user_id}@example.com", "pwd": "pbkdf2:sha256:..."}
+             "email": f"{user_id}@example.com", "pwd": temp_hash}
         )
         return user_id
     return existing["user_id"]
@@ -153,10 +164,10 @@ def _find_column_for_task(columns_list: list, task_id: str) -> Optional[str]:
     return None
 
 async def build_full_state() -> dict:
-    # Пользователи
-    users = await database.fetch_all("SELECT user_id, user_name, user_email, password_hash, avatar FROM user_")
+    # Пользователи (⚠️ пароли НЕ возвращаем на фронтенд!)
+    users = await database.fetch_all("SELECT user_id, user_name, user_email, avatar FROM user_")
     users_list = [
-        {"id": u["user_id"], "name": u["user_name"], "email": u["user_email"], "password": u["password_hash"], "avatar": u["avatar"]}
+        {"id": u["user_id"], "name": u["user_name"], "email": u["user_email"], "avatar": u["avatar"]}
         for u in users
     ]
 
@@ -178,7 +189,7 @@ async def build_full_state() -> dict:
             cid = col_dict.pop("column_id")
             col_dict["id"] = cid
             col_dict["name"] = col_dict.pop("column_name")
-            
+
             # Таски в колонке
             col_tasks = await database.fetch_all(
                 "SELECT task_id FROM task WHERE column_id = :cid ORDER BY created_at",
@@ -412,16 +423,16 @@ async def save_full_state(data: dict):
             for u in data["users"]:
                 uid = u.get("id")
                 if uid and uid.strip():
+                    # 🔐 НЕ перезаписываем password_hash из фронтенда — обновляем только имя/email/аватар
                     await database.execute(
                         """INSERT INTO user_ (user_id, user_name, user_email, password_hash, avatar)
                            VALUES (:uid, :name, :email, :pwd, :avatar)
                            ON CONFLICT (user_id) DO UPDATE SET
                                user_name = EXCLUDED.user_name,
                                user_email = EXCLUDED.user_email,
-                               password_hash = EXCLUDED.password_hash,
                                avatar = EXCLUDED.avatar""",
                         {"uid": uid, "name": u.get("name", ""), "email": u.get("email", ""),
-                         "pwd": u.get("password", "pbkdf2:sha256:..."), "avatar": u.get("avatar")}
+                         "pwd": hash_password("temp_password"), "avatar": u.get("avatar")}
                     )
 
         # 2. Приглашения
@@ -599,7 +610,7 @@ async def get_all_data():
 async def sync_data(data: dict = Body(...)):
     try:
         await save_full_state(data)
-        
+
         # 📣 Отправляем событие в Kafka!
         global producer
         if producer:
@@ -608,7 +619,7 @@ async def sync_data(data: dict = Body(...)):
                 print("📣 Событие state_synced отправлено в Kafka!")
             except Exception as ke:
                 print(f"⚠️ Не удалось отправить событие в Kafka: {ke}")
-                
+
         return {"status": "success", "message": "State synchronized successfully"}
     except Exception as e:
         traceback.print_exc()

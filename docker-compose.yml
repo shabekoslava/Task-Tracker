@@ -5,9 +5,9 @@ services:
     container_name: task_tracker_db
     restart: always
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-Slava2005}
-      POSTGRES_DB: task_tracker_bd
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
     ports:
       - "5432:5432"
     volumes:
@@ -50,7 +50,11 @@ services:
     restart: always
     command: uvicorn microservices.auth_service.main:app --host 0.0.0.0 --port 8000
     environment:
-      DATABASE_URL: postgresql+asyncpg://postgres:${DB_PASSWORD:-Slava2005}@postgres:5432/task_tracker_bd
+      DATABASE_URL: ${DATABASE_URL}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+      JWT_ALGORITHM: ${JWT_ALGORITHM}
+      JWT_ACCESS_TOKEN_EXPIRE_MINUTES: ${JWT_ACCESS_TOKEN_EXPIRE_MINUTES}
+      PASSWORD_PEPPER: ${PASSWORD_PEPPER}
     depends_on:
       - postgres
     networks:
@@ -63,8 +67,11 @@ services:
     restart: always
     command: uvicorn microservices.board_service.main:app --host 0.0.0.0 --port 8000
     environment:
-      DATABASE_URL: postgresql+asyncpg://postgres:${DB_PASSWORD:-Slava2005}@postgres:5432/task_tracker_bd
-      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      DATABASE_URL: ${DATABASE_URL}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+      JWT_ALGORITHM: ${JWT_ALGORITHM}
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS}
+      PASSWORD_PEPPER: ${PASSWORD_PEPPER}
     depends_on:
       - postgres
       - kafka
@@ -78,7 +85,9 @@ services:
     restart: always
     command: uvicorn microservices.chat_ws_service.main:app --host 0.0.0.0 --port 8000
     environment:
-      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+      JWT_ALGORITHM: ${JWT_ALGORITHM}
     depends_on:
       - kafka
     networks:

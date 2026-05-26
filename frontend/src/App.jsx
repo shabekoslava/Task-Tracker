@@ -294,6 +294,7 @@ export default function App() {
 
   const handleLogout = () => {
     localStorage.removeItem("active_user_session");
+    localStorage.removeItem("auth_token");
     setCurrentUser(null);
     setCurrentTab("Мои задачи");
   };

@@ -2,18 +2,35 @@
 import os
 import traceback
 from typing import List, Dict, Any, Optional
-from fastapi import FastAPI, Body, WebSocket, WebSocketDisconnect, HTTPException
+from datetime import datetime, timedelta
+
+from fastapi import FastAPI, Body, WebSocket, WebSocketDisconnect, HTTPException, Depends, Header
 from fastapi.middleware.cors import CORSMiddleware
 import databases
-from datetime import datetime
+import bcrypt
+from jose import jwt, JWTError
 
 # =============================================================================
-# Подключение к PostgreSQL
+# Загрузка переменных окружения из .env файла
+# =============================================================================
+try:
+    from dotenv import load_dotenv
+    load_dotenv(os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env"))
+except ImportError:
+    pass  # python-dotenv не установлен — переменные берутся из системного окружения
+
+# =============================================================================
+# Конфигурация из переменных окружения (.env)
 # =============================================================================
 DATABASE_URL = os.getenv(
     "DATABASE_URL",
     "postgresql+asyncpg://postgres:Slava2005@localhost:5432/task_tracker_bd"
 )
+
+JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "dev-secret-key-CHANGE-IN-PROD")
+JWT_ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
+JWT_ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("JWT_ACCESS_TOKEN_EXPIRE_MINUTES", "60"))
+PASSWORD_PEPPER = os.getenv("PASSWORD_PEPPER", "")
 
 database = databases.Database(DATABASE_URL)
 
@@ -52,6 +69,71 @@ class ConnectionManager:
                     pass
 
 manager = ConnectionManager()
+
+# =============================================================================
+# 🔐 Утилиты: хеширование паролей (bcrypt + соль + pepper)
+# =============================================================================
+def hash_password(plain_password: str) -> str:
+    """Хешируем пароль с помощью bcrypt.
+    Bcrypt автоматически генерирует случайную соль (salt) и включает её в хеш.
+    Дополнительно добавляем pepper из переменных окружения."""
+    peppered = plain_password + PASSWORD_PEPPER
+    salt = bcrypt.gensalt(rounds=12)
+    hashed = bcrypt.hashpw(peppered.encode("utf-8"), salt)
+    return hashed.decode("utf-8")
+
+
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    """Проверяем пароль: добавляем pepper и сверяем с bcrypt хешем."""
+    peppered = plain_password + PASSWORD_PEPPER
+    try:
+        return bcrypt.checkpw(peppered.encode("utf-8"), hashed_password.encode("utf-8"))
+    except Exception:
+        return False
+
+
+# =============================================================================
+# 🎫 Утилиты: JWT токены
+# =============================================================================
+def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
+    """Создаём зашифрованный JWT access-токен на бэкенде."""
+    to_encode = data.copy()
+    expire = datetime.utcnow() + (expires_delta or timedelta(minutes=JWT_ACCESS_TOKEN_EXPIRE_MINUTES))
+    to_encode.update({"exp": expire, "iat": datetime.utcnow()})
+    encoded_jwt = jwt.encode(to_encode, JWT_SECRET_KEY, algorithm=JWT_ALGORITHM)
+    return encoded_jwt
+
+
+def decode_access_token(token: str) -> Optional[dict]:
+    """Расшифровываем и валидируем JWT токен."""
+    try:
+        payload = jwt.decode(token, JWT_SECRET_KEY, algorithms=[JWT_ALGORITHM])
+        return payload
+    except JWTError:
+        return None
+
+
+async def get_current_user(authorization: Optional[str] = Header(None)) -> Optional[dict]:
+    """Извлекаем текущего пользователя из JWT токена в заголовке Authorization."""
+    if not authorization:
+        return None
+    parts = authorization.split()
+    if len(parts) != 2 or parts[0].lower() != "bearer":
+        return None
+    payload = decode_access_token(parts[1])
+    if not payload:
+        return None
+    user_id = payload.get("sub")
+    if not user_id:
+        return None
+    user = await database.fetch_one(
+        "SELECT user_id, user_name, user_email FROM user_ WHERE user_id = :uid",
+        {"uid": user_id}
+    )
+    if not user:
+        return None
+    return {"user_id": user["user_id"], "user_name": user["user_name"], "user_email": user["user_email"]}
+
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
@@ -116,11 +198,13 @@ async def ensure_user_exists(user_id: Optional[str]) -> Optional[str]:
     if not existing:
         name = user_id.capitalize()
         email = f"{user_id.lower()}@example.com"
+        # 🔐 Хешируем пароль-заглушку вместо хранения в открытом виде
+        temp_hash = hash_password("temp_password")
         await database.execute(
             """INSERT INTO user_ (user_id, user_name, user_email, password_hash)
                VALUES (:uid, :name, :email, :pwd)
                ON CONFLICT (user_id) DO NOTHING""",
-            {"uid": user_id, "name": name, "email": email, "pwd": "pbkdf2:sha256:..."}
+            {"uid": user_id, "name": name, "email": email, "pwd": temp_hash}
         )
         return user_id
     return existing["user_id"]
@@ -149,9 +233,9 @@ def _find_column_for_task(columns, task_id):
 # Сборка полного состояния (как у фронтенда)
 # =============================================================================
 async def build_full_state() -> dict:
-    # Пользователи
+    # Пользователи (⚠️ пароли НЕ возвращаем на фронтенд!)
     users = await database.fetch_all(
-        "SELECT user_id AS id, user_name AS name, user_email AS email, password_hash AS password FROM user_"
+        "SELECT user_id AS id, user_name AS name, user_email AS email FROM user_"
     )
     users_list = [dict(u) for u in users]
 
@@ -407,6 +491,14 @@ async def save_full_state(data: dict):
             for u in data["users"]:
                 uid = u.get("id")
                 if uid and uid.strip():
+                    # 🔐 Если пароль передан — хешируем, иначе ставим хеш-заглушку
+                    raw_pwd = u.get("password", "")
+                    if raw_pwd and not raw_pwd.startswith("$2b$"):
+                        pwd_hash = hash_password(raw_pwd)
+                    elif raw_pwd.startswith("$2b$"):
+                        pwd_hash = raw_pwd  # уже хешированный
+                    else:
+                        pwd_hash = hash_password("temp_password")
                     await database.execute(
                         """INSERT INTO user_ (user_id, user_name, user_email, password_hash)
                            VALUES (:uid, :name, :email, :pwd)
@@ -415,7 +507,7 @@ async def save_full_state(data: dict):
                                user_email = EXCLUDED.user_email,
                                password_hash = EXCLUDED.password_hash""",
                         {"uid": uid, "name": u.get("name", ""), "email": u.get("email", ""),
-                         "pwd": u.get("password", "pbkdf2:sha256:...")}
+                         "pwd": pwd_hash}
                     )
 
         # 2. Приглашения
@@ -603,6 +695,136 @@ async def sync_data(data: dict = Body(...)):
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Sync failed: {str(e)}")
 
+# =============================================================================
+# 🔑 JWT Auth эндпоинты (дублируют auth_service для монолитного режима)
+# =============================================================================
+@app.post("/api/auth/register")
+async def register_user(data: dict = Body(...)):
+    """Регистрация: хешируем пароль bcrypt, возвращаем JWT токен."""
+    name = data.get("name", "").strip()
+    email = data.get("email", "").strip()
+    password = data.get("password", "")
+    user_id = data.get("userId", "").strip()
+
+    if not name or not email or not password:
+        raise HTTPException(status_code=400, detail="Имя, email и пароль обязательны")
+
+    existing = await database.fetch_one(
+        "SELECT user_id FROM user_ WHERE LOWER(user_email) = :email",
+        {"email": email.lower()}
+    )
+    if existing:
+        raise HTTPException(status_code=409, detail="Пользователь с таким email уже существует")
+
+    if not user_id:
+        import random
+        while True:
+            user_id = f"INV-{random.randint(1000, 9999)}"
+            check = await database.fetch_one(
+                "SELECT user_id FROM user_ WHERE user_id = :uid", {"uid": user_id}
+            )
+            if not check:
+                break
+
+    password_hash = hash_password(password)
+
+    await database.execute(
+        """INSERT INTO user_ (user_id, user_name, user_email, password_hash)
+           VALUES (:uid, :name, :email, :pwd)
+           ON CONFLICT (user_id) DO NOTHING""",
+        {"uid": user_id, "name": name, "email": email, "pwd": password_hash}
+    )
+
+    access_token = create_access_token(data={"sub": user_id, "email": email, "name": name})
+
+    return {
+        "status": "success",
+        "user": {"id": user_id, "name": name, "email": email},
+        "access_token": access_token,
+        "token_type": "bearer"
+    }
+
+
+@app.post("/api/auth/login")
+async def login_user(data: dict = Body(...)):
+    """Логин: проверяем bcrypt хеш, возвращаем JWT токен."""
+    login_input = data.get("login", "").strip()
+    password = data.get("password", "")
+
+    if not login_input or not password:
+        raise HTTPException(status_code=400, detail="Логин и пароль обязательны")
+
+    user = await database.fetch_one(
+        """SELECT user_id, user_name, user_email, password_hash 
+           FROM user_ 
+           WHERE UPPER(user_id) = :login_upper 
+              OR LOWER(user_email) = :login_lower""",
+        {"login_upper": login_input.upper(), "login_lower": login_input.lower()}
+    )
+
+    if not user:
+        raise HTTPException(status_code=401, detail="Неверный логин или пароль")
+
+    if not verify_password(password, user["password_hash"]):
+        raise HTTPException(status_code=401, detail="Неверный логин или пароль")
+
+    access_token = create_access_token(
+        data={"sub": user["user_id"], "email": user["user_email"], "name": user["user_name"]}
+    )
+
+    return {
+        "status": "success",
+        "user": {"id": user["user_id"], "name": user["user_name"], "email": user["user_email"]},
+        "access_token": access_token,
+        "token_type": "bearer"
+    }
+
+
+@app.get("/api/auth/me")
+async def get_me(current_user: Optional[dict] = Depends(get_current_user)):
+    """Верификация JWT токена."""
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Невалидный или истекший токен")
+    return {
+        "status": "success",
+        "user": {
+            "id": current_user["user_id"],
+            "name": current_user["user_name"],
+            "email": current_user["user_email"]
+        }
+    }
+
+
+@app.post("/api/auth/change-password")
+async def change_password(data: dict = Body(...)):
+    """Смена пароля с хешированием."""
+    user_id = data.get("userId", "").strip()
+    new_password = data.get("newPassword", "")
+    email = data.get("email", "").strip()
+
+    if not new_password:
+        raise HTTPException(status_code=400, detail="Новый пароль обязателен")
+
+    user = None
+    if user_id:
+        user = await database.fetch_one(
+            "SELECT user_id FROM user_ WHERE UPPER(user_id) = :uid", {"uid": user_id.upper()}
+        )
+    elif email:
+        user = await database.fetch_one(
+            "SELECT user_id FROM user_ WHERE LOWER(user_email) = :email", {"email": email.lower()}
+        )
+
+    if not user:
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
+
+    new_hash = hash_password(new_password)
+    await database.execute(
+        "UPDATE user_ SET password_hash = :pwd WHERE user_id = :uid",
+        {"pwd": new_hash, "uid": user["user_id"]}
+    )
+    return {"status": "success", "message": "Пароль успешно изменен"}
+
 @app.get("/api/user/profile")
 async def get_user_profile(userId: str = None):
     if userId:
@@ -632,13 +854,14 @@ async def update_user_profile(data: dict = Body(...)):
             {"name": display_name, "email": email, "uid": matched_id}
         )
     else:
+        temp_hash = hash_password("temp_password")
         await database.execute(
             """INSERT INTO user_ (user_id, user_name, user_email, password_hash)
                VALUES (:uid, :name, :email, :pwd)
                ON CONFLICT (user_id) DO UPDATE SET
                    user_name = EXCLUDED.user_name,
                    user_email = EXCLUDED.user_email""",
-            {"uid": user_id, "name": display_name, "email": email, "pwd": "pbkdf2:sha256:..."}
+            {"uid": user_id, "name": display_name, "email": email, "pwd": temp_hash}
         )
     return {"status": "success", "message": "Profile updated successfully"}
 

@@ -30,39 +30,39 @@ export default function Auth({ onLoginSuccess }) {
   const [newPassword, setNewPassword] = useState("");
   const [confirmNewPassword, setConfirmNewPassword] = useState("");
 
-  // 🔄 Подтягиваем пользователей при открытии страницы авторизации
+  // 🔄 При монтировании проверяем сохранённый JWT токен
   useEffect(() => {
-    fetch("/api/all_data")
-      .then((res) => {
-        if (res.ok) return res.json();
-        throw new Error("Offline");
+    const token = localStorage.getItem("auth_token");
+    if (token) {
+      // Проверяем токен на бэкенде
+      fetch("/api/auth/me", {
+        headers: { "Authorization": `Bearer ${token}` }
       })
-      .then((data) => {
-        if (data.users && data.users.length > 0) {
-          localStorage.setItem("auth_users", JSON.stringify(data.users));
-        }
-      })
-      .catch((err) => console.log("Auth Mount: Не удалось подтянуть пользователей:", err.message));
+        .then((res) => {
+          if (res.ok) return res.json();
+          throw new Error("Invalid token");
+        })
+        .then((data) => {
+          if (data.user) {
+            const sessionData = {
+              id: data.user.id,
+              name: data.user.name,
+              email: data.user.email
+            };
+            localStorage.setItem("active_user_session", JSON.stringify(sessionData));
+            onLoginSuccess(sessionData);
+          }
+        })
+        .catch(() => {
+          // Токен невалидный или истёкший — удаляем
+          localStorage.removeItem("auth_token");
+        });
+    }
   }, []);
 
-  // Helper: Get all registered users
-  const getRegisteredUsers = () => {
-    const usersJson = localStorage.getItem("auth_users");
-    if (!usersJson) {
-      // Seed with a default user matching App.jsx currentUserId if empty
-      const defaultUser = {
-        id: "INV-1529",
-        name: "Иван Иванов",
-        email: "ivan@example.com",
-        password: "123"
-      };
-      const initialUsers = [defaultUser];
-      localStorage.setItem("auth_users", JSON.stringify(initialUsers));
-      return initialUsers;
-    }
-    return JSON.parse(usersJson);
-  };
-
+  // ==========================================================================
+  // 🔑 Логин через JWT (POST /api/auth/login)
+  // ==========================================================================
   const handleLoginSubmit = async (e) => {
     e.preventDefault();
     setError("");
@@ -75,50 +75,68 @@ export default function Auth({ onLoginSuccess }) {
       return;
     }
 
-    // 🔄 Синхронизируем ВСЕ данные напрямую из PostgreSQL перед валидацией
     try {
-      const res = await fetch("/api/all_data");
-      if (res.ok) {
-        const data = await res.json();
-        if (data.users && data.users.length > 0) {
-          localStorage.setItem("auth_users", JSON.stringify(data.users));
-        }
-        if (data.projects) {
-          localStorage.setItem("project_tracker_projects", JSON.stringify(data.projects));
-        }
-        if (data.chats) {
-          localStorage.setItem("project_tracker_chats", JSON.stringify(data.chats));
-        }
-        if (data.invitations) {
-          localStorage.setItem("project_invitations", JSON.stringify(data.invitations));
-        }
+      // 🔐 Отправляем логин/пароль на бэкенд — пароль проверяется через bcrypt на сервере
+      const res = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ login: trimmedInput, password: password })
+      });
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        setError(errData.detail || "Неверный логин или пароль");
+        return;
       }
-    } catch (err) {
-      console.log("Auth: Не удалось подтянуть свежие данные с бэкенда:", err.message);
-    }
 
-    const users = getRegisteredUsers();
-    // Allow logging in by either ID (e.g. INV-1529) or Email
-    const matchedUser = users.find(
-      (u) => 
-        (u.id.toUpperCase() === trimmedInput.toUpperCase() || 
-         u.email.toLowerCase() === trimmedInput.toLowerCase()) && 
-        u.password === password
-    );
+      const data = await res.json();
 
-    if (matchedUser) {
+      // 🎫 Сохраняем зашифрованный JWT токен от бэкенда
+      if (data.access_token) {
+        localStorage.setItem("auth_token", data.access_token);
+      }
+
       const sessionData = {
-        id: matchedUser.id,
-        name: matchedUser.name,
-        email: matchedUser.email
+        id: data.user.id,
+        name: data.user.name,
+        email: data.user.email
       };
       localStorage.setItem("active_user_session", JSON.stringify(sessionData));
+
+      // Подтягиваем данные проектов после успешного логина
+      try {
+        const allDataRes = await fetch("/api/all_data", {
+          headers: data.access_token 
+            ? { "Authorization": `Bearer ${data.access_token}` } 
+            : {}
+        });
+        if (allDataRes.ok) {
+          const allData = await allDataRes.json();
+          if (allData.projects) {
+            localStorage.setItem("project_tracker_projects", JSON.stringify(allData.projects));
+          }
+          if (allData.chats) {
+            localStorage.setItem("project_tracker_chats", JSON.stringify(allData.chats));
+          }
+          if (allData.invitations) {
+            localStorage.setItem("project_invitations", JSON.stringify(allData.invitations));
+          }
+        }
+      } catch (err) {
+        console.log("Не удалось подтянуть данные после логина:", err.message);
+      }
+
       onLoginSuccess(sessionData);
-    } else {
-      setError("Неверный ID пользователя/Email или пароль");
+
+    } catch (err) {
+      console.error("Login error:", err);
+      setError("Ошибка соединения с сервером. Проверьте, запущен ли бэкенд.");
     }
   };
 
+  // ==========================================================================
+  // 📝 Регистрация через JWT (POST /api/auth/register)
+  // ==========================================================================
   const handleRegisterSubmit = (e) => {
     e.preventDefault();
     setError("");
@@ -142,14 +160,6 @@ export default function Auth({ onLoginSuccess }) {
 
     if (password !== confirm) {
       setError("Пароли не совпадают");
-      return;
-    }
-
-    const users = getRegisteredUsers();
-
-    // Check if email already registered
-    if (users.some((u) => u.email.toLowerCase() === email.toLowerCase())) {
-      setError("Пользователь с таким Email уже зарегистрирован");
       return;
     }
 
@@ -182,7 +192,10 @@ export default function Auth({ onLoginSuccess }) {
       });
   };
 
-  const handleVerifyOtpSubmit = (e) => {
+  // ==========================================================================
+  // ✅ Подтверждение OTP → Регистрация на бэкенде с хешированием пароля
+  // ==========================================================================
+  const handleVerifyOtpSubmit = async (e) => {
     e.preventDefault();
     setError("");
 
@@ -195,47 +208,42 @@ export default function Auth({ onLoginSuccess }) {
     const email = tempUserData.email;
     const password = tempUserData.password;
 
-    const users = getRegisteredUsers();
+    try {
+      // 🔐 Отправляем данные на бэкенд — пароль хешируется bcrypt НА СЕРВЕРЕ
+      const res = await fetch("/api/auth/register", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, email, password })
+      });
 
-    // Check if email already registered (double check)
-    if (users.some((u) => u.email.toLowerCase() === email.toLowerCase())) {
-      setError("Пользователь с таким Email уже зарегистрирован");
-      setIsVerifying(false);
-      return;
-    }
-
-    // Generate unique User ID like INV-XXXX
-    let generatedId = "";
-    let isUnique = false;
-    while (!isUnique) {
-      const randomDigits = Math.floor(1000 + Math.random() * 9000); // 4 digits
-      generatedId = `INV-${randomDigits}`;
-      if (!users.some((u) => u.id === generatedId)) {
-        isUnique = true;
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        setError(errData.detail || "Ошибка при регистрации");
+        setIsVerifying(false);
+        return;
       }
+
+      const data = await res.json();
+
+      // 🎫 Сохраняем зашифрованный JWT токен от бэкенда
+      if (data.access_token) {
+        localStorage.setItem("auth_token", data.access_token);
+      }
+
+      const sessionData = {
+        id: data.user.id,
+        name: data.user.name,
+        email: data.user.email
+      };
+      localStorage.setItem("active_user_session", JSON.stringify(sessionData));
+
+      alert(`Регистрация успешна! Ваш уникальный ID: ${data.user.id}`);
+      onLoginSuccess(sessionData);
+
+    } catch (err) {
+      console.error("Register error:", err);
+      setError("Ошибка соединения с сервером.");
     }
-
-    const newUser = {
-      id: generatedId,
-      name,
-      email,
-      password
-    };
-
-    // Save new user
-    const updatedUsers = [...users, newUser];
-    localStorage.setItem("auth_users", JSON.stringify(updatedUsers));
-
-    // Save session
-    const sessionData = {
-      id: newUser.id,
-      name: newUser.name,
-      email: newUser.email
-    };
-    localStorage.setItem("active_user_session", JSON.stringify(sessionData));
-
-    alert(`Регистрация успешна! Ваш уникальный ID: ${generatedId}`);
-    onLoginSuccess(sessionData);
 
     // Reset states
     setIsVerifying(false);
@@ -285,22 +293,15 @@ export default function Auth({ onLoginSuccess }) {
       return;
     }
 
-    const users = getRegisteredUsers();
-    const matchedUser = users.find((u) => u.email.toLowerCase() === email.toLowerCase());
-    
-    if (!matchedUser) {
-      setError("Аккаунт с такой электронной почтой не найден");
-      return;
-    }
-
+    // Отправляем код восстановления на бэкенд
     const code = String(Math.floor(100000 + Math.random() * 900000));
     setGeneratedOtp(code);
-    setTempUserData(matchedUser);
+    setTempUserData({ email });
 
     fetch("/api/auth/send-code", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email, code, name: matchedUser.name }),
+      body: JSON.stringify({ email, code, name: "Восстановление" }),
     })
       .then(() => {
         setRecoveryStep(2);
@@ -324,7 +325,7 @@ export default function Auth({ onLoginSuccess }) {
     setRecoveryStep(3);
   };
 
-  const handleResetPassword = (e) => {
+  const handleResetPassword = async (e) => {
     e.preventDefault();
     setError("");
     if (newPassword !== confirmNewPassword) {
@@ -336,24 +337,32 @@ export default function Auth({ onLoginSuccess }) {
       return;
     }
 
-    const users = getRegisteredUsers();
-    const updatedUsers = users.map(u => 
-      u.id === tempUserData.id ? { ...u, password: newPassword } : u
-    );
-    
-    localStorage.setItem("auth_users", JSON.stringify(updatedUsers));
-    
-    // Фоновая синхронизация изменения пароля с сервером
-    fetch("/api/sync", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ users: updatedUsers }),
-    }).catch(console.error);
+    try {
+      // 🔐 Отправляем новый пароль на бэкенд — хешируется bcrypt на сервере
+      const res = await fetch("/api/auth/change-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: tempUserData?.email || recoveryEmail,
+          newPassword: newPassword
+        })
+      });
 
-    alert("Ваш пароль был успешно изменен! Теперь вы можете войти.");
+      if (res.ok) {
+        alert("Ваш пароль был успешно изменен! Теперь вы можете войти.");
+      } else {
+        const errData = await res.json().catch(() => ({}));
+        setError(errData.detail || "Ошибка при смене пароля");
+        return;
+      }
+    } catch (err) {
+      console.error(err);
+      alert("Пароль изменён локально, но сервер недоступен.");
+    }
+
     setIsRecovering(false);
     setIsLogin(true);
-    setLoginIdOrEmail(tempUserData.email);
+    setLoginIdOrEmail(tempUserData?.email || recoveryEmail);
     setLoginPassword("");
   };
 
