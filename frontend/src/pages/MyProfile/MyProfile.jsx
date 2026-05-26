@@ -113,76 +113,7 @@ export default function MyProfile({ userId, onLogout, onProfileUpdate }) {
     });
   }
 
-  function saveEmail() {
-    const trimmed = editingEmail.trim();
-    if (!trimmed) {
-      alert("Пожалуйста, введите адрес электронной почты");
-      return;
-    }
 
-    const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
-    if (!emailRegex.test(trimmed)) {
-      alert("Пожалуйста, введите корректный адрес электронной почты");
-      return;
-    }
-
-    // Check if email already registered by ANOTHER user
-    const usersJson = localStorage.getItem("auth_users");
-    if (usersJson) {
-      const users = JSON.parse(usersJson);
-      const isAlreadyTaken = users.some(
-        (u) => u.id !== userId && u.email.toLowerCase() === trimmed.toLowerCase()
-      );
-      if (isAlreadyTaken) {
-        alert("Этот Email уже занят другим пользователем");
-        return;
-      }
-    }
-
-    setEmail(trimmed);
-
-    // Sync local storage session so sidebar changes instantly
-    const session = localStorage.getItem("active_user_session");
-    let updatedSession = null;
-    if (session) {
-      updatedSession = JSON.parse(session);
-      updatedSession.email = trimmed;
-      localStorage.setItem("active_user_session", JSON.stringify(updatedSession));
-    }
-
-    // Sync inside auth_users database in localStorage
-    if (usersJson) {
-      const users = JSON.parse(usersJson);
-      const updatedUsers = users.map((u) => 
-        u.id === userId ? { ...u, email: trimmed } : u
-      );
-      localStorage.setItem("auth_users", JSON.stringify(updatedUsers));
-    }
-
-    if (onProfileUpdate && updatedSession) {
-      onProfileUpdate(updatedSession);
-    }
-
-    // Sync to Python FastAPI Server
-    fetch("/api/user/profile", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        userId,
-        displayName: displayName,
-        email: trimmed
-      })
-    })
-    .then((res) => res.json())
-    .then((data) => {
-      console.log("Profile email synchronized to FastAPI:", data);
-      alert("Email сохранён");
-    })
-    .catch((err) => {
-      console.log("FastAPI offline, email saved locally:", err.message);
-      alert("Email сохранён локально");
-    });
-  }
 
   function changePassword() {
     if (!currentPassword || !newPassword) {
@@ -217,9 +148,13 @@ export default function MyProfile({ userId, onLogout, onProfileUpdate }) {
       }
       
       // Trigger sync
+      const token = localStorage.getItem("auth_token");
       fetch("/api/sync", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { 
+          "Content-Type": "application/json",
+          ...(token ? { "Authorization": `Bearer ${token}` } : {})
+        },
         body: JSON.stringify({ users: updatedUsers }),
       }).catch(e => console.log(e));
     }
@@ -257,9 +192,13 @@ export default function MyProfile({ userId, onLogout, onProfileUpdate }) {
           localStorage.setItem("auth_users", JSON.stringify(updatedUsers));
           
           // Trigger sync
+          const token = localStorage.getItem("auth_token");
           fetch("/api/sync", {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: { 
+              "Content-Type": "application/json",
+              ...(token ? { "Authorization": `Bearer ${token}` } : {})
+            },
             body: JSON.stringify({ users: updatedUsers }),
           }).catch(e => console.log(e));
         }
@@ -326,8 +265,12 @@ export default function MyProfile({ userId, onLogout, onProfileUpdate }) {
         </Card>
 
         <Card title="Информация">
-          <label>ID пользователя</label>
+          <label>ID пользователя (только для чтения)</label>
           <input type="text" value={userId} readOnly />
+          
+          <label>Email (только для чтения)</label>
+          <input type="text" value={email || ""} readOnly />
+          
           <label>Отображаемое имя</label>
           <input
             type="text"
@@ -339,23 +282,6 @@ export default function MyProfile({ userId, onLogout, onProfileUpdate }) {
               Сохранить
             </button>
             <button className="btn" onClick={() => setEditingName(displayName)}>
-              Отмена
-            </button>
-          </div>
-        </Card>
-
-        <Card title="Контакты">
-          <label>Email</label>
-          <input
-            type="email"
-            value={editingEmail}
-            onChange={(e) => setEditingEmail(e.target.value)}
-          />
-          <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-            <button className="btn primary" onClick={saveEmail}>
-              Сохранить
-            </button>
-            <button className="btn" onClick={() => setEditingEmail(email)}>
               Отмена
             </button>
           </div>

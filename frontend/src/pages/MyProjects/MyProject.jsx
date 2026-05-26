@@ -264,17 +264,8 @@ export default function MyProjects({
                         <button
                           className="btn danger"
                           onClick={() => {
-                            const password = window.prompt("Для удаления проекта введите ваш пароль от аккаунта:");
-                            if (password === null) return;
-                            
-                            const authUsers = JSON.parse(localStorage.getItem("auth_users") || "[]");
-                            const userRecord = authUsers.find(u => u.id === currentUserId);
-                            if (userRecord && password === userRecord.password) {
-                              if (window.confirm(`Вы уверены, что хотите полностью удалить проект "${project.name}"? Это действие со всеми его задачами абсолютно необратимо!`)) {
-                                onDeleteProject(project.id);
-                              }
-                            } else {
-                              alert("Неверный пароль. Удаление отменено.");
+                            if (window.confirm(`Вы уверены, что хотите полностью удалить проект "${project.name}"? Это действие со всеми его задачами абсолютно необратимо!`)) {
+                              onDeleteProject(project.id);
                             }
                           }}
                           style={{

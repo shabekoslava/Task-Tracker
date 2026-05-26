@@ -67,7 +67,10 @@ export default function App() {
           
           if (data.event === "state_synced") {
             console.log("⚡ Database state synced event received. Fetching fresh data from API...");
-            fetch("/api/all_data")
+            const token = localStorage.getItem("auth_token");
+            fetch("/api/all_data", {
+              headers: token ? { "Authorization": `Bearer ${token}` } : {}
+            })
               .then((res) => {
                 if (!res.ok) throw new Error("API Offline");
                 return res.json();
@@ -91,23 +94,6 @@ export default function App() {
                 }
               })
               .catch((err) => console.error("Error fetching fresh data after sync event:", err));
-          } else if (data.type === "SYNC_STATE") {
-            console.log("⚡ Real-time WebSocket peer sync update received:", data);
-            isIncomingSyncRef.current = true;
-            if (data.projects) {
-              localStorage.setItem(
-                "project_tracker_projects",
-                JSON.stringify(data.projects),
-              );
-              setProjects(data.projects);
-            }
-            if (data.chats) {
-              localStorage.setItem(
-                "project_tracker_chats",
-                JSON.stringify(data.chats),
-              );
-              setChats(data.chats);
-            }
           }
         } catch (err) {
           console.error("Failed to parse WebSocket sync message:", err);
@@ -143,7 +129,10 @@ export default function App() {
 
   // Sync state initially from FastAPI if active
   useEffect(() => {
-    fetch("/api/all_data")
+    const token = localStorage.getItem("auth_token");
+    fetch("/api/all_data", {
+      headers: token ? { "Authorization": `Bearer ${token}` } : {}
+    })
       .then((res) => {
         if (!res.ok) throw new Error("API Offline");
         return res.json();
@@ -189,6 +178,9 @@ export default function App() {
     localStorage.setItem("project_tracker_chats", JSON.stringify(chats));
 
     // If this update was triggered by an incoming WebSocket sync, prevent loop
+    localStorage.setItem("project_tracker_projects", JSON.stringify(projects));
+    localStorage.setItem("project_tracker_chats", JSON.stringify(chats));
+
     if (isIncomingSyncRef.current) {
       setTimeout(() => {
         isIncomingSyncRef.current = false;
@@ -196,22 +188,21 @@ export default function App() {
       return;
     }
 
-    // Broadcast state mutation to other clients over WebSocket
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(
-        JSON.stringify({
-          type: "SYNC_STATE",
-          projects,
-          chats,
-        }),
-      );
+    // Skip the very first render so we don't push stale localStorage to the DB
+    if (!window.__isProjectsMounted) {
+      window.__isProjectsMounted = true;
+      return;
     }
 
     // Background push to backend
     const users = JSON.parse(localStorage.getItem("auth_users") || "[]");
+    const token = localStorage.getItem("auth_token");
     fetch("/api/sync", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { 
+        "Content-Type": "application/json",
+        ...(token ? { "Authorization": `Bearer ${token}` } : {})
+      },
       body: JSON.stringify({ projects, users, chats }),
     }).catch((err) =>
       console.log("Failed to sync projects to FastAPI:", err.message),
@@ -229,10 +220,19 @@ export default function App() {
       return;
     }
 
+    if (!window.__isInvitationsMounted) {
+      window.__isInvitationsMounted = true;
+      return;
+    }
+
     // Background push to backend
+    const token = localStorage.getItem("auth_token");
     fetch("/api/sync", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { 
+        "Content-Type": "application/json",
+        ...(token ? { "Authorization": `Bearer ${token}` } : {})
+      },
       body: JSON.stringify({ invitations }),
     }).catch((err) =>
       console.log("Failed to sync invitations to FastAPI:", err.message),
@@ -251,9 +251,18 @@ export default function App() {
         return;
       }
 
+      if (!window.__isUsersMounted) {
+        window.__isUsersMounted = true;
+        return;
+      }
+
+      const token = localStorage.getItem("auth_token");
       fetch("/api/sync", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { 
+          "Content-Type": "application/json",
+          ...(token ? { "Authorization": `Bearer ${token}` } : {})
+        },
         body: JSON.stringify({ users }),
       }).catch((err) =>
         console.log("Failed to sync users to FastAPI:", err.message),
@@ -392,26 +401,14 @@ export default function App() {
   };
 
   const handleAcceptInvite = (inviteId, projectId) => {
-    // Find the invitation object to get the assigned role
-    const inviteObj = invitations.find((inv) => inv.id === inviteId);
-    const selectedRole = inviteObj ? inviteObj.role || "member" : "member";
-
-    // 1. Join project with custom role
-    const success = handleJoinProjectById(projectId, selectedRole);
-
-    // 2. Mark invitation status as accepted
+    // Mark invitation status as accepted
     setInvitations((prev) =>
       prev.map((inv) =>
         inv.id === inviteId ? { ...inv, status: "accepted" } : inv,
       ),
     );
 
-    if (success) {
-      alert("Добро пожаловать в проект! Приглашение успешно принято.");
-      setCurrentTab(`project-${projectId}`);
-    } else {
-      alert("Не удалось войти: вы уже состоите в этом проекте.");
-    }
+    alert("Приглашение принято! Пожалуйста, подождите загрузки проекта...");
   };
 
   const handleDeclineInvite = (inviteId) => {

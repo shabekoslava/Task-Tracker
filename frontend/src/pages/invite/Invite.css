@@ -289,3 +289,48 @@
   font-size: 13px;
   border-radius: 6px;
 }
+
+/* Дополнительные стили для кнопок в приглашениях */
+.btn-link-clear {
+  background: transparent;
+  border: none;
+  color: var(--nav-text-inactive);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 6px;
+  transition: all 0.2s ease;
+  outline: none;
+}
+
+.btn-link-clear:hover {
+  color: var(--btn-danger);
+  background-color: rgba(239, 68, 68, 0.1);
+}
+
+.btn-icon-delete,
+.btn-icon-cancel {
+  background: transparent;
+  border: none;
+  font-size: 16px;
+  cursor: pointer;
+  padding: 6px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+  color: var(--text-color);
+  outline: none;
+}
+
+.btn-icon-delete:hover {
+  background-color: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+}
+
+.btn-icon-cancel:hover {
+  background-color: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+}

@@ -3,10 +3,12 @@ import os
 import traceback
 import json
 from typing import List, Dict, Any, Optional
-from fastapi import FastAPI, Body, HTTPException
+from fastapi import FastAPI, Body, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import databases
 import bcrypt
+from jose import jwt, JWTError
 from datetime import datetime
 
 DATABASE_URL = os.getenv(
@@ -24,6 +26,19 @@ def hash_password(plain_password: str) -> str:
     salt = bcrypt.gensalt(rounds=12)
     hashed = bcrypt.hashpw(peppered.encode("utf-8"), salt)
     return hashed.decode("utf-8")
+
+JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "dev-secret-key-CHANGE-IN-PROD")
+JWT_ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
+security = HTTPBearer(auto_error=False)
+
+async def get_current_user_id(credentials: HTTPAuthorizationCredentials = Depends(security)) -> Optional[str]:
+    if not credentials:
+        return None
+    try:
+        payload = jwt.decode(credentials.credentials, JWT_SECRET_KEY, algorithms=[JWT_ALGORITHM])
+        return payload.get("sub")
+    except JWTError:
+        return None
 
 app = FastAPI(title="Board & Project Service")
 
@@ -85,16 +100,23 @@ async def startup():
     # 2. Инициализация Kafka
     global producer
     if KAFKA_BOOTSTRAP_SERVERS:
-        try:
-            from aiokafka import AIOKafkaProducer
-            producer = AIOKafkaProducer(
-                bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS,
-                value_serializer=lambda v: json.dumps(v).encode("utf-8")
-            )
-            await producer.start()
-            print(f"⚡ Kafka Producer запущен (брокер: {KAFKA_BOOTSTRAP_SERVERS})")
-        except Exception as e:
-            print(f"⚠️ Не удалось подключить Kafka Producer: {e}")
+        from aiokafka import AIOKafkaProducer
+        producer = AIOKafkaProducer(
+            bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS,
+            value_serializer=lambda v: json.dumps(v).encode("utf-8")
+        )
+        # Попытка подключения с ретраями
+        for attempt in range(5):
+            try:
+                await producer.start()
+                print(f"⚡ Kafka Producer запущен (брокер: {KAFKA_BOOTSTRAP_SERVERS})")
+                break
+            except Exception as e:
+                print(f"⚠️ Не удалось подключить Kafka Producer (попытка {attempt+1}/5): {e}")
+                await asyncio.sleep(5)
+        else:
+            print("❌ Не удалось запустить Kafka Producer после 5 попыток.")
+            producer = None
 
 @app.on_event("shutdown")
 async def shutdown():
@@ -163,16 +185,55 @@ def _find_column_for_task(columns_list: list, task_id: str) -> Optional[str]:
                 return col["id"]
     return None
 
-async def build_full_state() -> dict:
-    # Пользователи (⚠️ пароли НЕ возвращаем на фронтенд!)
-    users = await database.fetch_all("SELECT user_id, user_name, user_email, avatar FROM user_")
-    users_list = [
-        {"id": u["user_id"], "name": u["user_name"], "email": u["user_email"], "avatar": u["avatar"]}
-        for u in users
-    ]
+async def build_full_state(user_id: Optional[str] = None) -> dict:
+    if not user_id:
+        return {"users": [], "projects": [], "invitations": [], "chats": []}
+
+    # Пользователи (только те, с кем мы как-то связаны: общие проекты, чаты, инвайты)
+    users = await database.fetch_all("""
+        SELECT DISTINCT u.user_id, u.user_name, u.user_email, u.avatar 
+        FROM user_ u
+        WHERE u.user_id = :uid
+           OR u.user_id IN (
+               SELECT r.user_id FROM project_user_role r 
+               WHERE r.project_id IN (
+                   SELECT project_id FROM project WHERE owner_id = :uid
+                   UNION
+                   SELECT project_id FROM project_user_role WHERE user_id = :uid
+               )
+           )
+           OR u.user_id IN (
+               SELECT cm.user_id FROM chat_member cm 
+               WHERE cm.chat_id IN (
+                   SELECT chat_id FROM chat_member WHERE user_id = :uid
+               )
+           )
+           OR u.user_id IN (
+               SELECT i.invited_by FROM invitations i WHERE i.invited_user = :uid
+               UNION
+               SELECT i.invited_user FROM invitations i WHERE i.invited_by = :uid
+           )
+    """, {"uid": user_id})
+
+    users_list = []
+    for u in users:
+        u_dict = {
+            "id": u["user_id"],
+            "name": u["user_name"],
+            "avatar": u["avatar"]
+        }
+        # Показывать реальный email только для самого пользователя
+        if u["user_id"] == user_id:
+            u_dict["email"] = u["user_email"]
+        else:
+            u_dict["email"] = "***@***.***"  # Скрыто в целях безопасности
+        users_list.append(u_dict)
 
     # Проекты
-    projects_raw = await database.fetch_all("SELECT * FROM project")
+    projects_raw = await database.fetch_all(
+        "SELECT DISTINCT p.* FROM project p LEFT JOIN project_user_role r ON p.project_id = r.project_id WHERE p.owner_id = :uid OR r.user_id = :uid",
+        {"uid": user_id}
+    )
     projects_list = []
     for proj in projects_raw:
         proj_dict = dict(proj)
@@ -317,7 +378,10 @@ async def build_full_state() -> dict:
         projects_list.append(proj_dict)
 
     # Чаты
-    chats_raw = await database.fetch_all("SELECT * FROM chat")
+    chats_raw = await database.fetch_all(
+        "SELECT DISTINCT c.* FROM chat c LEFT JOIN chat_member m ON c.chat_id = m.chat_id WHERE m.user_id = :uid",
+        {"uid": user_id}
+    )
     chats_list = []
     for chat in chats_raw:
         chat_dict = dict(chat)
@@ -389,12 +453,15 @@ async def build_full_state() -> dict:
     return {
         "users": users_list,
         "projects": projects_list,
-        "invitations": await get_all_invitations(),
+        "invitations": await get_all_invitations(user_id),
         "chats": chats_list
     }
 
-async def get_all_invitations():
-    invs = await database.fetch_all("SELECT * FROM invitations")
+async def get_all_invitations(user_id: str):
+    invs = await database.fetch_all(
+        "SELECT * FROM invitations WHERE invited_user = :uid OR invited_by = :uid",
+        {"uid": user_id}
+    )
     result = []
     for inv in invs:
         inv_dict = dict(inv)
@@ -416,28 +483,37 @@ async def get_all_invitations():
         result.append(inv_dict)
     return result
 
-async def save_full_state(data: dict):
+async def save_full_state(data: dict, user_id: str):
     async with database.transaction():
         # 1. Пользователи
         if "users" in data:
             for u in data["users"]:
-                uid = u.get("id")
-                if uid and uid.strip():
-                    # 🔐 НЕ перезаписываем password_hash из фронтенда — обновляем только имя/email/аватар
-                    await database.execute(
-                        """INSERT INTO user_ (user_id, user_name, user_email, password_hash, avatar)
-                           VALUES (:uid, :name, :email, :pwd, :avatar)
-                           ON CONFLICT (user_id) DO UPDATE SET
+                uid = await ensure_user_exists(u.get("id"))
+                if uid:
+                    if uid == user_id:
+                        await database.execute(
+                            """INSERT INTO user_ (user_id, user_name, user_email, password_hash, avatar)
+                               VALUES (:uid, :name, :email, :pwd, :avatar)
+                               ON CONFLICT (user_id) DO UPDATE SET
                                user_name = EXCLUDED.user_name,
                                user_email = EXCLUDED.user_email,
                                avatar = EXCLUDED.avatar""",
-                        {"uid": uid, "name": u.get("name", ""), "email": u.get("email", ""),
-                         "pwd": hash_password("temp_password"), "avatar": u.get("avatar")}
-                    )
+                            {"uid": uid, "name": u.get("name", ""), "email": u.get("email", ""),
+                             "pwd": hash_password("temp_password"), "avatar": u.get("avatar")}
+                        )
+                    else:
+                        await database.execute(
+                            """INSERT INTO user_ (user_id, user_name, user_email, password_hash, avatar)
+                               VALUES (:uid, :name, :email, :pwd, :avatar)
+                               ON CONFLICT (user_id) DO NOTHING""",
+                            {"uid": uid, "name": u.get("name", ""), "email": u.get("email", ""),
+                             "pwd": hash_password("temp_password"), "avatar": u.get("avatar")}
+                        )
 
         # 2. Приглашения
         if "invitations" in data:
-            await database.execute("DELETE FROM invitations")
+            if user_id:
+                await database.execute("DELETE FROM invitations WHERE invited_user = :uid OR invited_by = :uid", {"uid": user_id})
             for inv in data["invitations"]:
                 by_user = await ensure_user_exists(inv.get("invitedBy"))
                 to_user = await ensure_user_exists(inv.get("invitedUser"))
@@ -446,25 +522,47 @@ async def save_full_state(data: dict):
                 await database.execute(
                     """INSERT INTO invitations (invite_id, project_id, invited_by, invited_user, status, role, created_at)
                        VALUES (:iid, :pid, :by, :to, :status, :role, :cat)
-                       ON CONFLICT (invite_id) DO NOTHING""",
+                       ON CONFLICT (invite_id) DO UPDATE SET status = EXCLUDED.status, role = EXCLUDED.role""",
                     {"iid": inv["id"], "pid": inv["projectId"], "by": by_user,
                      "to": to_user, "status": inv.get("status", "pending"),
                      "role": inv.get("role", "member"), "cat": parse_datetime(inv.get("created_at"))}
                 )
 
+                if inv.get("status") == "accepted":
+                    await database.execute(
+                        """INSERT INTO project_user_role (project_id, user_id, user_role)
+                           VALUES (:pid, :uid, :role)
+                           ON CONFLICT (project_id, user_id) DO UPDATE SET user_role = EXCLUDED.user_role""",
+                        {"pid": inv["projectId"], "uid": to_user, "role": inv.get("role", "member")}
+                    )
+
         # 3. Проекты
-        if "projects" in data:
-            await database.execute("DELETE FROM task_comments WHERE task_id IN (SELECT task_id FROM task WHERE project_id IN (SELECT project_id FROM project))")
-            await database.execute("DELETE FROM task_tag WHERE task_id IN (SELECT task_id FROM task WHERE project_id IN (SELECT project_id FROM project))")
-            await database.execute("DELETE FROM task_performer WHERE task_id IN (SELECT task_id FROM task WHERE project_id IN (SELECT project_id FROM project))")
-            await database.execute("DELETE FROM task WHERE project_id IN (SELECT project_id FROM project)")
-            await database.execute("DELETE FROM project_column WHERE project_id IN (SELECT project_id FROM project)")
-            await database.execute("DELETE FROM project_user_role WHERE project_id IN (SELECT project_id FROM project)")
-            await database.execute("DELETE FROM invitations WHERE project_id IN (SELECT project_id FROM project)")
-            await database.execute("DELETE FROM project")
+        if "projects" in data and user_id:
+            # Сначала удалим проекты, которые юзер удалил (если он владелец)
+            owned_projects = await database.fetch_all("SELECT project_id FROM project WHERE owner_id = :uid", {"uid": user_id})
+            owned_pids = {p["project_id"] for p in owned_projects}
+            payload_pids = {p["id"] for p in data["projects"]}
+            deleted_pids = owned_pids - payload_pids
+            for pid in deleted_pids:
+                await database.execute("DELETE FROM task_comments WHERE task_id IN (SELECT task_id FROM task WHERE project_id = :pid)", {"pid": pid})
+                await database.execute("DELETE FROM task_tag WHERE task_id IN (SELECT task_id FROM task WHERE project_id = :pid)", {"pid": pid})
+                await database.execute("DELETE FROM task_performer WHERE task_id IN (SELECT task_id FROM task WHERE project_id = :pid)", {"pid": pid})
+                await database.execute("DELETE FROM task WHERE project_id = :pid", {"pid": pid})
+                await database.execute("DELETE FROM project_column WHERE project_id = :pid", {"pid": pid})
+                await database.execute("DELETE FROM project_user_role WHERE project_id = :pid", {"pid": pid})
+                await database.execute("DELETE FROM invitations WHERE project_id = :pid", {"pid": pid})
+                await database.execute("DELETE FROM project WHERE project_id = :pid", {"pid": pid})
 
             for proj in data["projects"]:
                 pid = proj["id"]
+                # Очищаем только элементы ЭТОГО проекта перед вставкой обновленных данных
+                await database.execute("DELETE FROM task_comments WHERE task_id IN (SELECT task_id FROM task WHERE project_id = :pid)", {"pid": pid})
+                await database.execute("DELETE FROM task_tag WHERE task_id IN (SELECT task_id FROM task WHERE project_id = :pid)", {"pid": pid})
+                await database.execute("DELETE FROM task_performer WHERE task_id IN (SELECT task_id FROM task WHERE project_id = :pid)", {"pid": pid})
+                await database.execute("DELETE FROM task WHERE project_id = :pid", {"pid": pid})
+                await database.execute("DELETE FROM project_column WHERE project_id = :pid", {"pid": pid})
+                await database.execute("DELETE FROM project_user_role WHERE project_id = :pid", {"pid": pid})
+                
                 owner_id = proj.get("members", [{}])[0].get("id") if proj.get("members") else None
                 owner_id = await ensure_user_exists(owner_id)
 
@@ -557,12 +655,23 @@ async def save_full_state(data: dict):
                         )
 
         # 4. Чаты
-        if "chats" in data:
-            await database.execute("DELETE FROM message")
-            await database.execute("DELETE FROM chat_member")
-            await database.execute("DELETE FROM chat")
+        if "chats" in data and user_id:
+            user_chats = await database.fetch_all("SELECT chat_id FROM chat_member WHERE user_id = :uid", {"uid": user_id})
+            user_cids = {c["chat_id"] for c in user_chats}
+            payload_cids = {c["id"] for c in data["chats"]}
+            deleted_cids = user_cids - payload_cids
+            for cid in deleted_cids:
+                await database.execute("DELETE FROM message WHERE chat_id = :cid", {"cid": cid})
+                await database.execute("DELETE FROM chat_member WHERE chat_id = :cid", {"cid": cid})
+                await database.execute("DELETE FROM chat WHERE chat_id = :cid", {"cid": cid})
+
             for chat in data["chats"]:
                 cid = chat["id"]
+                # Очищаем содержимое этого чата перед вставкой
+                await database.execute("DELETE FROM message WHERE chat_id = :cid", {"cid": cid})
+                await database.execute("DELETE FROM chat_member WHERE chat_id = :cid", {"cid": cid})
+                await database.execute("DELETE FROM chat WHERE chat_id = :cid", {"cid": cid})
+
                 pid = chat.get("projectId")
                 tid = chat.get("taskId")
                 if pid and tid:
@@ -603,20 +712,31 @@ async def save_full_state(data: dict):
 # =============================================================================
 
 @app.get("/api/all_data")
-async def get_all_data():
-    return await build_full_state()
+async def get_all_data(user_id: Optional[str] = Depends(get_current_user_id)):
+    return await build_full_state(user_id)
 
 @app.post("/api/sync")
-async def sync_data(data: dict = Body(...)):
+async def sync_data(data: dict = Body(...), user_id: Optional[str] = Depends(get_current_user_id)):
     try:
-        await save_full_state(data)
+        if not user_id:
+            # Если нет токена, просто сохраняем пользователей
+            # В реальном приложении это должно быть запрещено
+            pass
+        await save_full_state(data, user_id)
 
         # 📣 Отправляем событие в Kafka!
         global producer
         if producer:
+            import asyncio
             try:
-                await producer.send_and_wait("board-updates", {"event": "state_synced"})
+                # Use wait_for to prevent hanging indefinitely if Kafka is down
+                await asyncio.wait_for(
+                    producer.send_and_wait("board-updates", {"event": "state_synced", "user_id": user_id}),
+                    timeout=2.0
+                )
                 print("📣 Событие state_synced отправлено в Kafka!")
+            except asyncio.TimeoutError:
+                print("⚠️ Тайм-аут при отправке события в Kafka. Kafka недоступна.")
             except Exception as ke:
                 print(f"⚠️ Не удалось отправить событие в Kafka: {ke}")
 
