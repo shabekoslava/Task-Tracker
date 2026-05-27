@@ -252,7 +252,12 @@ export default function MyTasks({
                               <span
                                 className={`due-date-meta ${group.id === "overdue" ? "text-danger" : ""}`}
                               >
-                                📅 До: {task.deadline}
+                                📅 До:{" "}
+                                {new Date(task.deadline).toLocaleDateString("ru-RU", {
+                                  day: "numeric",
+                                  month: "short",
+                                  year: "numeric",
+                                })}
                               </span>
                             )}
                             {task.estimate && (

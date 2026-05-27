@@ -64,12 +64,14 @@ export default function App() {
       socket.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
-          
+
           if (data.event === "state_synced") {
-            console.log("⚡ Database state synced event received. Fetching fresh data from API...");
+            console.log(
+              "⚡ Database state synced event received. Fetching fresh data from API...",
+            );
             const token = localStorage.getItem("auth_token");
             fetch("/api/all_data", {
-              headers: token ? { "Authorization": `Bearer ${token}` } : {}
+              headers: token ? { Authorization: `Bearer ${token}` } : {},
             })
               .then((res) => {
                 if (!res.ok) throw new Error("API Offline");
@@ -78,28 +80,56 @@ export default function App() {
               .then((freshData) => {
                 isIncomingSyncRef.current = true;
                 if (freshData.projects) {
-                  localStorage.setItem("project_tracker_projects", JSON.stringify(freshData.projects));
+                  localStorage.setItem(
+                    "project_tracker_projects",
+                    JSON.stringify(freshData.projects),
+                  );
                   setProjects(freshData.projects);
                 }
                 if (freshData.chats) {
-                  localStorage.setItem("project_tracker_chats", JSON.stringify(freshData.chats));
+                  localStorage.setItem(
+                    "project_tracker_chats",
+                    JSON.stringify(freshData.chats),
+                  );
                   setChats(freshData.chats);
                 }
                 if (freshData.invitations) {
-                  localStorage.setItem("project_invitations", JSON.stringify(freshData.invitations));
+                  localStorage.setItem(
+                    "project_invitations",
+                    JSON.stringify(freshData.invitations),
+                  );
                   setInvitations(freshData.invitations);
                 }
                 if (freshData.users && freshData.users.length > 0) {
-                  localStorage.setItem("auth_users", JSON.stringify(freshData.users));
+                  localStorage.setItem(
+                    "auth_users",
+                    JSON.stringify(freshData.users),
+                  );
+                  
+                  // Keep active_user_session in sync with fresh database data
+                  const session = localStorage.getItem("active_user_session");
+                  if (session) {
+                    const parsedSession = JSON.parse(session);
+                    const freshMe = freshData.users.find(u => u.id === parsedSession.id);
+                    if (freshMe) {
+                      const updatedSession = { ...parsedSession, avatar: freshMe.avatar, name: freshMe.name };
+                      localStorage.setItem("active_user_session", JSON.stringify(updatedSession));
+                      setCurrentUser(updatedSession);
+                    }
+                  }
                 }
               })
-              .catch((err) => console.error("Error fetching fresh data after sync event:", err));
+              .catch((err) =>
+                console.error(
+                  "Error fetching fresh data after sync event:",
+                  err,
+                ),
+              );
           }
         } catch (err) {
           console.error("Failed to parse WebSocket sync message:", err);
         }
       };
-
 
       socket.onclose = () => {
         console.log("⚡ WebSocket connection closed. Reconnecting in 3s...");
@@ -127,11 +157,20 @@ export default function App() {
     ? projects.find((project) => currentTab === `project-${project.id}`)
     : null;
 
+  // Update browser tab title to show project name (or app name)
+  useEffect(() => {
+    if (selectedProject) {
+      document.title = `${selectedProject.name} — Task Tracker`;
+    } else {
+      document.title = "Task Tracker";
+    }
+  }, [selectedProject]);
+
   // Sync state initially from FastAPI if active
   useEffect(() => {
     const token = localStorage.getItem("auth_token");
     fetch("/api/all_data", {
-      headers: token ? { "Authorization": `Bearer ${token}` } : {}
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
     })
       .then((res) => {
         if (!res.ok) throw new Error("API Offline");
@@ -155,6 +194,17 @@ export default function App() {
         }
         if (data.users && data.users.length > 0) {
           localStorage.setItem("auth_users", JSON.stringify(data.users));
+          
+          const session = localStorage.getItem("active_user_session");
+          if (session) {
+            const parsedSession = JSON.parse(session);
+            const freshMe = data.users.find(u => u.id === parsedSession.id);
+            if (freshMe) {
+              const updatedSession = { ...parsedSession, avatar: freshMe.avatar, name: freshMe.name };
+              localStorage.setItem("active_user_session", JSON.stringify(updatedSession));
+              setCurrentUser(updatedSession);
+            }
+          }
         }
         if (data.chats) {
           localStorage.setItem(
@@ -199,9 +249,9 @@ export default function App() {
     const token = localStorage.getItem("auth_token");
     fetch("/api/sync", {
       method: "POST",
-      headers: { 
+      headers: {
         "Content-Type": "application/json",
-        ...(token ? { "Authorization": `Bearer ${token}` } : {})
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
       body: JSON.stringify({ projects, users, chats }),
     }).catch((err) =>
@@ -229,9 +279,9 @@ export default function App() {
     const token = localStorage.getItem("auth_token");
     fetch("/api/sync", {
       method: "POST",
-      headers: { 
+      headers: {
         "Content-Type": "application/json",
-        ...(token ? { "Authorization": `Bearer ${token}` } : {})
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
       body: JSON.stringify({ invitations }),
     }).catch((err) =>
@@ -243,7 +293,7 @@ export default function App() {
   useEffect(() => {
     if (currentUser) {
       const users = JSON.parse(localStorage.getItem("auth_users") || "[]");
-      
+
       if (isIncomingSyncRef.current) {
         setTimeout(() => {
           isIncomingSyncRef.current = false;
@@ -259,9 +309,9 @@ export default function App() {
       const token = localStorage.getItem("auth_token");
       fetch("/api/sync", {
         method: "POST",
-        headers: { 
+        headers: {
           "Content-Type": "application/json",
-          ...(token ? { "Authorization": `Bearer ${token}` } : {})
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
         body: JSON.stringify({ users }),
       }).catch((err) =>
@@ -309,26 +359,43 @@ export default function App() {
   };
 
   // --- Invitation Callbacks ---
-  const handleJoinProjectById = (projectId, role = "member") => {
+  const handleJoinProjectById = async (projectId, role = "member") => {
+    // Check if already a member locally first
     const targetProject = projects.find((p) => p.id === projectId);
-    if (!targetProject) return false;
-
-    // Check if already a member
-    if (targetProject.members.some((m) => m.id === currentUserId)) {
+    if (targetProject && targetProject.members.some((m) => m.id === currentUserId)) {
       return false;
     }
 
-    setProjects((prev) =>
-      prev.map((project) => {
-        if (project.id !== projectId) return project;
-        return {
-          ...project,
-          members: [...project.members, { id: currentUserId, role: role }],
-        };
-      }),
-    );
-
-    return true;
+    try {
+      const token = localStorage.getItem("auth_token");
+      const res = await fetch("/api/project/join", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { "Authorization": `Bearer ${token}` } : {})
+        },
+        body: JSON.stringify({ projectId, role })
+      });
+      
+      if (res.ok) {
+        // Fetch new data to update local state
+        const allDataRes = await fetch("/api/all_data", {
+           headers: token ? { "Authorization": `Bearer ${token}` } : {}
+        });
+        if (allDataRes.ok) {
+           const allData = await allDataRes.json();
+           if (allData.projects) {
+             setProjects(allData.projects);
+             localStorage.setItem("project_tracker_projects", JSON.stringify(allData.projects));
+           }
+        }
+        return true;
+      }
+      return false;
+    } catch (err) {
+      console.error(err);
+      return false;
+    }
   };
 
   const handleSendInvite = (projectId, targetUserId, role = "member") => {
@@ -351,16 +418,12 @@ export default function App() {
         message: `Пользователь с ID ${targetUserId} не зарегистрирован`,
       };
     }
-    
+
     // Normalize case to exactly match the database
     const exactTargetUserId = recipientUser.id;
 
     // Check if target is already in project members
-    if (
-      targetProject.members.some(
-        (m) => m.id === exactTargetUserId,
-      )
-    ) {
+    if (targetProject.members.some((m) => m.id === exactTargetUserId)) {
       return {
         success: false,
         message: "Пользователь уже является участником этого проекта",
@@ -492,8 +555,7 @@ export default function App() {
     if (!project) return false;
 
     if (project.members.some((m) => m.id === trimmed)) {
-      alert("Пользователь уже состоит в этом проекте!");
-      return false;
+      return false; // ProjectBoard будет показывать сообщение об ошибке
     }
 
     const newInvite = {
@@ -508,7 +570,6 @@ export default function App() {
     };
 
     setInvitations((prev) => [...prev, newInvite]);
-    alert("Приглашение успешно отправлено!");
     return true;
   };
 
@@ -745,7 +806,7 @@ export default function App() {
     );
   };
 
-  const addComment = (projectId, taskId, text) => {
+  const addComment = (projectId, taskId, text, source = "board") => {
     const trimmed = text.trim();
     if (!trimmed) return false;
 
@@ -763,7 +824,7 @@ export default function App() {
               comments: [
                 ...task.comments,
                 {
-                  id: `comment-${Date.now()}`,
+                  id: source === "messenger" ? `comment-msg-${Date.now()}` : `comment-${Date.now()}`,
                   text: trimmed,
                   createdAt: new Date().toISOString(),
                   authorId: currentUserId,
@@ -908,8 +969,10 @@ export default function App() {
     if (currentTab === "Мои проекты") {
       return (
         <MyProjects
-          projects={projects.filter((p) =>
-            Array.isArray(p.members) && p.members.some((m) => m.id === currentUserId),
+          projects={projects.filter(
+            (p) =>
+              Array.isArray(p.members) &&
+              p.members.some((m) => m.id === currentUserId),
           )}
           onCreateProject={createProject}
           onInviteUser={sendInvitation}

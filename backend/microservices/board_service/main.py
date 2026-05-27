@@ -569,7 +569,10 @@ async def save_full_state(data: dict, user_id: str):
                 await database.execute(
                     """INSERT INTO project (project_id, project_name, description, owner_id, tags, created_at, updated_at)
                        VALUES (:pid, :name, :desc, :owner, :tags, :cat, :uat)
-                       ON CONFLICT (project_id) DO NOTHING""",
+                       ON CONFLICT (project_id) DO UPDATE SET 
+                       project_name = EXCLUDED.project_name,
+                       description = EXCLUDED.description,
+                       tags = EXCLUDED.tags""",
                     {"pid": pid, "name": proj["name"], "desc": proj.get("description", ""),
                      "owner": owner_id,
                      "tags": proj.get("tags", []),
@@ -710,6 +713,44 @@ async def save_full_state(data: dict, user_id: str):
 # =============================================================================
 # API эндпоинты
 # =============================================================================
+
+@app.post("/api/project/join")
+async def join_project(data: dict = Body(...), user_id: Optional[str] = Depends(get_current_user_id)):
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    project_id = data.get("projectId")
+    role = data.get("role", "member")
+    if not project_id:
+        raise HTTPException(status_code=400, detail="projectId required")
+    
+    # Check if project exists
+    project = await database.fetch_one("SELECT project_id FROM project WHERE project_id = :pid", {"pid": project_id})
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+        
+    # Check if already member
+    member = await database.fetch_one("SELECT user_id FROM project_user_role WHERE project_id = :pid AND user_id = :uid", {"pid": project_id, "uid": user_id})
+    if member:
+        raise HTTPException(status_code=400, detail="Already a member")
+        
+    await database.execute(
+        "INSERT INTO project_user_role (project_id, user_id, user_role) VALUES (:pid, :uid, :role)",
+        {"pid": project_id, "uid": user_id, "role": role}
+    )
+    
+    # Send kafka event
+    global producer
+    if producer:
+        import asyncio
+        try:
+            await asyncio.wait_for(
+                producer.send_and_wait("board-updates", {"event": "state_synced", "user_id": user_id}),
+                timeout=2.0
+            )
+        except Exception:
+            pass
+
+    return {"status": "success"}
 
 @app.get("/api/all_data")
 async def get_all_data(user_id: Optional[str] = Depends(get_current_user_id)):

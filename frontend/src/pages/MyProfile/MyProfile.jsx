@@ -37,11 +37,28 @@ export default function MyProfile({ userId, onLogout, onProfileUpdate }) {
         setEditingName(data.displayName);
         setEmail(data.email);
         setEditingEmail(data.email);
+        if (data.avatar !== undefined) {
+           setAvatar(data.avatar);
+           
+           // Ensure active session gets the fresh avatar
+           const session = localStorage.getItem("active_user_session");
+           if (session) {
+             const parsed = JSON.parse(session);
+             if (parsed.avatar !== data.avatar) {
+               parsed.avatar = data.avatar;
+               localStorage.setItem("active_user_session", JSON.stringify(parsed));
+               if (onProfileUpdate) onProfileUpdate(parsed);
+             }
+           }
+        }
         setIsLoading(false);
       })
       .catch((err) => {
-        console.warn("FastAPI backend не запущен, загружаем данные локальной сессии:", err.message);
-        
+        console.warn(
+          "FastAPI backend не запущен, загружаем данные локальной сессии:",
+          err.message,
+        );
+
         // Резервный вариант: загрузка из localStorage
         const session = localStorage.getItem("active_user_session");
         if (session) {
@@ -68,22 +85,25 @@ export default function MyProfile({ userId, onLogout, onProfileUpdate }) {
     }
 
     setDisplayName(trimmed);
-    
+
     // Sync local storage session so sidebar changes instantly
     const session = localStorage.getItem("active_user_session");
     let updatedSession = null;
     if (session) {
       updatedSession = JSON.parse(session);
       updatedSession.name = trimmed;
-      localStorage.setItem("active_user_session", JSON.stringify(updatedSession));
+      localStorage.setItem(
+        "active_user_session",
+        JSON.stringify(updatedSession),
+      );
     }
 
     // Sync inside auth_users database in localStorage
     const usersJson = localStorage.getItem("auth_users");
     if (usersJson) {
       const users = JSON.parse(usersJson);
-      const updatedUsers = users.map((u) => 
-        u.id === userId ? { ...u, name: trimmed } : u
+      const updatedUsers = users.map((u) =>
+        u.id === userId ? { ...u, name: trimmed } : u,
       );
       localStorage.setItem("auth_users", JSON.stringify(updatedUsers));
     }
@@ -99,23 +119,21 @@ export default function MyProfile({ userId, onLogout, onProfileUpdate }) {
       body: JSON.stringify({
         userId,
         displayName: trimmed,
-        email: editingEmail
+        email: editingEmail,
+      }),
+    })
+      .then((res) => res.json())
+      .then((data) => {
+        console.log("Profile name synchronized to FastAPI:", data);
+        alert("Имя сохранено");
       })
-    })
-    .then((res) => res.json())
-    .then((data) => {
-      console.log("Profile name synchronized to FastAPI:", data);
-      alert("Имя сохранено");
-    })
-    .catch((err) => {
-      console.log("FastAPI offline, profile saved locally:", err.message);
-      alert("Имя сохранено локально");
-    });
+      .catch((err) => {
+        console.log("FastAPI offline, profile saved locally:", err.message);
+        alert("Имя сохранено локально");
+      });
   }
 
-
-
-  function changePassword() {
+  async function changePassword() {
     if (!currentPassword || !newPassword) {
       alert("Заполните поля пароля");
       return;
@@ -124,45 +142,80 @@ export default function MyProfile({ userId, onLogout, onProfileUpdate }) {
       alert("Новый пароль и подтверждение не совпадают");
       return;
     }
-    const usersJson = localStorage.getItem("auth_users");
-    if (usersJson) {
-      const users = JSON.parse(usersJson);
-      const user = users.find(u => u.id === userId);
-      
-      if (!user || user.password !== currentPassword) {
-        alert("Текущий пароль введен неверно");
+
+    try {
+      const response = await fetch("/api/auth/change-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userId: userId,
+          currentPassword: currentPassword,
+          newPassword: newPassword,
+        }),
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        alert(result.detail || "Ошибка при смене пароля");
         return;
       }
-      
-      const updatedUsers = users.map((u) => 
-        u.id === userId ? { ...u, password: newPassword } : u
-      );
-      localStorage.setItem("auth_users", JSON.stringify(updatedUsers));
-      
-      // Update session as well if password is stored there
+
+      // Если успешно, обновим и в локальном хранилище (резервный вариант)
+      const usersJson = localStorage.getItem("auth_users");
+      if (usersJson) {
+        const users = JSON.parse(usersJson);
+        const updatedUsers = users.map((u) =>
+          u.id === userId ? { ...u, password: newPassword } : u,
+        );
+        localStorage.setItem("auth_users", JSON.stringify(updatedUsers));
+      }
+
       const session = localStorage.getItem("active_user_session");
       if (session) {
         const parsed = JSON.parse(session);
         parsed.password = newPassword;
         localStorage.setItem("active_user_session", JSON.stringify(parsed));
       }
+
+      setCurrentPassword("");
+      setNewPassword("");
+      setConfirmPassword("");
+      alert("Пароль успешно изменён!");
+    } catch (err) {
+      console.error(err);
       
-      // Trigger sync
-      const token = localStorage.getItem("auth_token");
-      fetch("/api/sync", {
-        method: "POST",
-        headers: { 
-          "Content-Type": "application/json",
-          ...(token ? { "Authorization": `Bearer ${token}` } : {})
-        },
-        body: JSON.stringify({ users: updatedUsers }),
-      }).catch(e => console.log(e));
+      // Fallback на локальное хранилище если бэкенд не доступен
+      const usersJson = localStorage.getItem("auth_users");
+      if (usersJson) {
+        const users = JSON.parse(usersJson);
+        const user = users.find((u) => u.id === userId);
+
+        if (!user || user.password !== currentPassword) {
+          alert("Текущий пароль введен неверно (локально)");
+          return;
+        }
+
+        const updatedUsers = users.map((u) =>
+          u.id === userId ? { ...u, password: newPassword } : u,
+        );
+        localStorage.setItem("auth_users", JSON.stringify(updatedUsers));
+
+        const session = localStorage.getItem("active_user_session");
+        if (session) {
+          const parsed = JSON.parse(session);
+          parsed.password = newPassword;
+          localStorage.setItem("active_user_session", JSON.stringify(parsed));
+        }
+
+        setCurrentPassword("");
+        setNewPassword("");
+        setConfirmPassword("");
+        alert("Пароль успешно изменён (локально)!");
+      } else {
+        alert("Ошибка сети и нет локальных данных.");
+      }
     }
-    
-    setCurrentPassword("");
-    setNewPassword("");
-    setConfirmPassword("");
-    alert("Пароль успешно изменён!");
   }
 
   function handleAvatarChange(event) {
@@ -172,7 +225,7 @@ export default function MyProfile({ userId, onLogout, onProfileUpdate }) {
       reader.onload = (e) => {
         const base64Avatar = e.target.result;
         setAvatar(base64Avatar);
-        
+
         // Save to active session
         const session = localStorage.getItem("active_user_session");
         if (session) {
@@ -181,26 +234,26 @@ export default function MyProfile({ userId, onLogout, onProfileUpdate }) {
           localStorage.setItem("active_user_session", JSON.stringify(parsed));
           if (onProfileUpdate) onProfileUpdate(parsed);
         }
-        
+
         // Save to users DB
         const usersJson = localStorage.getItem("auth_users");
         if (usersJson) {
           const users = JSON.parse(usersJson);
-          const updatedUsers = users.map((u) => 
-            u.id === userId ? { ...u, avatar: base64Avatar } : u
+          const updatedUsers = users.map((u) =>
+            u.id === userId ? { ...u, avatar: base64Avatar } : u,
           );
           localStorage.setItem("auth_users", JSON.stringify(updatedUsers));
-          
+
           // Trigger sync
           const token = localStorage.getItem("auth_token");
           fetch("/api/sync", {
             method: "POST",
-            headers: { 
+            headers: {
               "Content-Type": "application/json",
-              ...(token ? { "Authorization": `Bearer ${token}` } : {})
+              ...(token ? { Authorization: `Bearer ${token}` } : {}),
             },
             body: JSON.stringify({ users: updatedUsers }),
-          }).catch(e => console.log(e));
+          }).catch((e) => console.log(e));
         }
       };
       reader.readAsDataURL(file);
@@ -216,7 +269,17 @@ export default function MyProfile({ userId, onLogout, onProfileUpdate }) {
   // Пока данные грузятся, показываем спиннер
   if (isLoading) {
     return (
-      <div className="page-fade-in profile-page" style={{ display: "flex", justifyContent: "center", alignItems: "center", height: "80vh", fontSize: "18px", color: "var(--nav-text-inactive)" }}>
+      <div
+        className="page-fade-in profile-page"
+        style={{
+          display: "flex",
+          justifyContent: "center",
+          alignItems: "center",
+          height: "80vh",
+          fontSize: "18px",
+          color: "var(--nav-text-inactive)",
+        }}
+      >
         Загрузка профиля...
       </div>
     );
@@ -238,11 +301,19 @@ export default function MyProfile({ userId, onLogout, onProfileUpdate }) {
                 style={{ cursor: "pointer" }}
               />
             ) : (
-              <div 
-                className="avatar-image avatar-placeholder" 
+              <div
+                className="avatar-image avatar-placeholder"
                 onClick={() => document.querySelector(".avatar-input").click()}
               >
-                <svg className="avatar-placeholder-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <svg
+                  className="avatar-placeholder-icon"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
                   <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
                   <circle cx="12" cy="7" r="4" />
                 </svg>
@@ -255,8 +326,8 @@ export default function MyProfile({ userId, onLogout, onProfileUpdate }) {
               className="avatar-input"
               style={{ display: "none" }}
             />
-            <button 
-              className="btn secondary small" 
+            <button
+              className="btn secondary small"
               onClick={() => document.querySelector(".avatar-input").click()}
             >
               Выбрать фото
@@ -265,12 +336,20 @@ export default function MyProfile({ userId, onLogout, onProfileUpdate }) {
         </Card>
 
         <Card title="Информация">
-          <label>ID пользователя (только для чтения)</label>
-          <input type="text" value={userId} readOnly />
-          
-          <label>Email (только для чтения)</label>
-          <input type="text" value={email || ""} readOnly />
-          
+          {/* Поля только для чтения — стилизованы иначе, без рамки */}
+          <div className="profile-readonly-block">
+            <div className="profile-readonly-item">
+              <span className="profile-readonly-label">Идентификатор</span>
+              <span className="profile-readonly-value">{userId}</span>
+            </div>
+            <div className="profile-readonly-item">
+              <span className="profile-readonly-label">Email</span>
+              <span className="profile-readonly-value">{email || "—"}</span>
+            </div>
+          </div>
+
+          <div className="profile-divider" />
+
           <label>Отображаемое имя</label>
           <input
             type="text"
@@ -289,22 +368,22 @@ export default function MyProfile({ userId, onLogout, onProfileUpdate }) {
 
         <Card title="Смена пароля">
           <label>Текущий пароль</label>
-          <input 
-            type="password" 
-            value={currentPassword} 
-            onChange={(e) => setCurrentPassword(e.target.value)} 
+          <input
+            type="password"
+            value={currentPassword}
+            onChange={(e) => setCurrentPassword(e.target.value)}
           />
           <label>Новый пароль</label>
-          <input 
-            type="password" 
-            value={newPassword} 
-            onChange={(e) => setNewPassword(e.target.value)} 
+          <input
+            type="password"
+            value={newPassword}
+            onChange={(e) => setNewPassword(e.target.value)}
           />
           <label>Подтвердите новый пароль</label>
-          <input 
-            type="password" 
-            value={confirmPassword} 
-            onChange={(e) => setConfirmPassword(e.target.value)} 
+          <input
+            type="password"
+            value={confirmPassword}
+            onChange={(e) => setConfirmPassword(e.target.value)}
           />
           <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
             <button className="btn primary" onClick={changePassword}>

@@ -5,20 +5,19 @@ import "./ProjectBoard.css";
 const Avatar = ({ name, avatarUrl }) => {
   if (avatarUrl) {
     return (
-      <div 
-        className="avatar" 
-        title={name} 
-        style={{ 
-          backgroundImage: `url(${avatarUrl})`, 
-          backgroundSize: 'cover', 
-          backgroundPosition: 'center', 
-          color: 'transparent' 
+      <div
+        className="avatar"
+        title={name}
+        style={{
+          backgroundImage: `url(${avatarUrl})`,
+          backgroundSize: "cover",
+          backgroundPosition: "center",
+          color: "transparent",
         }}
-      >
-      </div>
+      ></div>
     );
   }
-  
+
   // Generate initials
   const initials = name
     .split(/[\s-]+/)
@@ -37,19 +36,19 @@ const Avatar = ({ name, avatarUrl }) => {
 const parseEstimate = (str) => {
   const res = { days: "", hours: "", minutes: "" };
   if (!str) return res;
-  
+
   const dMatch = str.match(/(\d+)\s*[dд]/i);
   const hMatch = str.match(/(\d+)\s*[hч]/i);
   const mMatch = str.match(/(\d+)\s*[mм]/i);
-  
+
   if (dMatch) res.days = parseInt(dMatch[1], 10);
   if (hMatch) res.hours = parseInt(hMatch[1], 10);
   if (mMatch) res.minutes = parseInt(mMatch[1], 10);
-  
+
   if (!dMatch && !hMatch && !mMatch && /^\d+$/.test(str.trim())) {
     res.hours = parseInt(str.trim(), 10);
   }
-  
+
   return res;
 };
 
@@ -58,11 +57,11 @@ const formatEstimate = (days, hours, minutes) => {
   const d = parseInt(days, 10);
   const h = parseInt(hours, 10);
   const m = parseInt(minutes, 10);
-  
+
   if (!isNaN(d) && d > 0) parts.push(`${d}д`);
   if (!isNaN(h) && h > 0) parts.push(`${h}ч`);
   if (!isNaN(m) && m > 0) parts.push(`${m}м`);
-  
+
   return parts.join(" ");
 };
 
@@ -161,15 +160,13 @@ export default function ProjectBoard({
   const [columnNameDraft, setColumnNameDraft] = useState("");
 
   // Tab View Mode
-  const [viewMode, setViewMode] = useState(initialViewMode || "board"); // "board" | "settings"
+  const [viewMode, setViewMode] = useState(initialViewMode || "board");
   const [projectNameDraft, setProjectNameDraft] = useState(project.name || "");
-  const [projectDescDraft, setProjectDescDraft] = useState(
-    project.description || "",
-  );
+  const [projectDescDraft, setProjectDescDraft] = useState(project.description || "");
   const [inviteUserIdDraft, setInviteUserIdDraft] = useState("");
   const [inviteUserRoleDraft, setInviteUserRoleDraft] = useState("member");
 
-  // Sync draft states when project changes
+  // Sync draft states when project changes (but not while user is editing)
   useEffect(() => {
     setProjectNameDraft(project.name || "");
     setProjectDescDraft(project.description || "");
@@ -189,19 +186,15 @@ export default function ProjectBoard({
     const found = allUsers.find((u) => u.id === userId);
     return found ? found.avatar : null;
   };
-  const projectTags = project.tags || [
-    "дизайн",
-    "баг",
-    "срочно",
-    "фича",
-    "фронтенд",
-    "бэкенд",
-  ];
+
+  // Use current project tags (always fresh from prop)
+  const projectTags = project.tags || ["дизайн", "баг", "срочно", "фича", "фронтенд", "бэкенд"];
 
   // Modal State
   const [activeTaskId, setActiveTaskId] = useState(null);
   const [editTaskDraft, setEditTaskDraft] = useState({});
   const [commentDraft, setCommentDraft] = useState("");
+  const [commentsCollapsed, setCommentsCollapsed] = useState(false);
 
   // Adding Task State
   const [addingInColumn, setAddingInColumn] = useState(null);
@@ -387,23 +380,49 @@ export default function ProjectBoard({
               </div>
 
               <div className="comments-section">
-                <h4>Комментарии</h4>
-                <div className="comments-list">
-                  {task.comments?.length > 0 ? (
-                    task.comments.map((c) => (
-                      <div key={c.id} className="comment-item">
-                        <Avatar name="User" />
-                        <div className="comment-content">
-                          <span className="comment-text">{c.text}</span>
-                        </div>
-                      </div>
-                    ))
-                  ) : (
-                    <p className="no-comments">
-                      Комментариев пока нет. Начните обсуждение!
-                    </p>
-                  )}
+                <div
+                  style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "8px" }}
+                >
+                  <h4 style={{ margin: 0 }}>Комментарии ({task.comments?.length || 0})</h4>
+                  <button
+                    type="button"
+                    onClick={() => setCommentsCollapsed((v) => !v)}
+                    style={{
+                      background: "transparent",
+                      border: "none",
+                      cursor: "pointer",
+                      color: "var(--nav-text-inactive)",
+                      fontSize: "12px",
+                      padding: "2px 6px",
+                    }}
+                  >
+                    {commentsCollapsed ? "▶ Развернуть" : "▼ Свернуть"}
+                  </button>
                 </div>
+                {!commentsCollapsed && (
+                  <div className="comments-list">
+                    {task.comments?.length > 0 ? (
+                      task.comments.map((c) => (
+                        <div key={c.id} className="comment-item">
+                          <Avatar
+                            name={getUserName(c.authorId)}
+                            avatarUrl={getUserAvatar(c.authorId)}
+                          />
+                          <div className="comment-content">
+                            <span className="comment-author-name" style={{ fontSize: "11px", fontWeight: 600, color: "var(--nav-text-inactive)", marginBottom: "2px", display: "block" }}>
+                              {getUserName(c.authorId)}
+                            </span>
+                            <span className="comment-text">{c.text}</span>
+                          </div>
+                        </div>
+                      ))
+                    ) : (
+                      <p className="no-comments">
+                        Комментариев пока нет. Начните обсуждение!
+                      </p>
+                    )}
+                  </div>
+                )}
                 <div className="comment-input-area">
                   <input
                     type="text"
@@ -431,7 +450,10 @@ export default function ProjectBoard({
             </div>
 
             <div className="modal-sidebar">
-              <div className="sidebar-properties-grid" style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+              <div
+                className="sidebar-properties-grid"
+                style={{ display: "flex", flexDirection: "column", gap: "2px" }}
+              >
                 <div className="sidebar-property-row">
                   <span className="sidebar-property-label">⚙️ Статус</span>
                   <div className="sidebar-property-value">
@@ -442,10 +464,16 @@ export default function ProjectBoard({
                       }}
                       disabled={!canEditTasks}
                       style={{
-                        background: task.completed ? 'rgba(16, 185, 129, 0.15) !important' : 'rgba(59, 130, 246, 0.15) !important',
-                        borderColor: task.completed ? '#10b981 !important' : '#3b82f6 !important',
-                        color: task.completed ? '#10b981 !important' : '#3b82f6 !important',
-                        fontWeight: '600'
+                        background: task.completed
+                          ? "rgba(16, 185, 129, 0.15) !important"
+                          : "rgba(59, 130, 246, 0.15) !important",
+                        borderColor: task.completed
+                          ? "#10b981 !important"
+                          : "#3b82f6 !important",
+                        color: task.completed
+                          ? "#10b981 !important"
+                          : "#3b82f6 !important",
+                        fontWeight: "600",
                       }}
                     >
                       <option value="Active">🔘 В работе</option>
@@ -495,14 +523,28 @@ export default function ProjectBoard({
                 </div>
 
                 <div className="sidebar-property-row">
-                  <span className="sidebar-property-label">⏳ Время выполнения</span>
-                  <div className="sidebar-property-value" style={{ display: 'flex', alignItems: 'center', position: 'relative', width: '100%' }}>
+                  <span className="sidebar-property-label">
+                    ⏳ Время выполнения
+                  </span>
+                  <div
+                    className="sidebar-property-value"
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      position: "relative",
+                      width: "100%",
+                    }}
+                  >
                     <input
                       type="number"
                       className="estimate-hours-input"
                       min="0"
                       placeholder="0"
-                      value={editTaskDraft.estimate ? parseInt(editTaskDraft.estimate, 10) || "" : ""}
+                      value={
+                        editTaskDraft.estimate
+                          ? parseInt(editTaskDraft.estimate, 10) || ""
+                          : ""
+                      }
                       onChange={(e) => {
                         const val = e.target.value;
                         setEditTaskDraft({
@@ -512,7 +554,19 @@ export default function ProjectBoard({
                       }}
                       disabled={!canEditTasks}
                     />
-                    <span style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--nav-text-inactive)', fontSize: '13px', pointerEvents: 'none' }}>ч</span>
+                    <span
+                      style={{
+                        position: "absolute",
+                        right: "10px",
+                        top: "50%",
+                        transform: "translateY(-50%)",
+                        color: "var(--nav-text-inactive)",
+                        fontSize: "13px",
+                        pointerEvents: "none",
+                      }}
+                    >
+                      ч
+                    </span>
                   </div>
                 </div>
 
@@ -520,7 +574,13 @@ export default function ProjectBoard({
                   <span className="sidebar-property-label">🔥 Срочность</span>
                   <div className="sidebar-property-value">
                     <select
-                      value={editTaskDraft.priority === "Срочно" || editTaskDraft.priority === "Критичный" || editTaskDraft.priority === "Высокий" ? "Срочно" : "Не срочно"}
+                      value={
+                        editTaskDraft.priority === "Срочно" ||
+                        editTaskDraft.priority === "Критичный" ||
+                        editTaskDraft.priority === "Высокий"
+                          ? "Срочно"
+                          : "Не срочно"
+                      }
                       onChange={(e) =>
                         setEditTaskDraft({
                           ...editTaskDraft,
@@ -554,25 +614,49 @@ export default function ProjectBoard({
                 </div>
               </div>
 
-              <div style={{ marginTop: '20px', borderTop: '1px solid var(--border-color)', paddingTop: '16px' }}>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--nav-text-inactive)', fontSize: '13.5px', fontWeight: '500', marginBottom: '10px' }}>
+              <div
+                style={{
+                  marginTop: "20px",
+                  borderTop: "1px solid var(--border-color)",
+                  paddingTop: "16px",
+                }}
+              >
+                <label
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "6px",
+                    color: "var(--nav-text-inactive)",
+                    fontSize: "13.5px",
+                    fontWeight: "500",
+                    marginBottom: "10px",
+                  }}
+                >
                   🏷️ Теги задачи
                 </label>
-                <div className="task-modal-tags-list" style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '12px' }}>
+                <div
+                  className="task-modal-tags-list"
+                  style={{
+                    display: "flex",
+                    flexWrap: "wrap",
+                    gap: "6px",
+                    marginBottom: "12px",
+                  }}
+                >
                   {(editTaskDraft.tags || []).map((tag) => (
-                    <span 
-                      key={tag} 
-                      className="tag-pill" 
-                      style={{ 
-                        display: 'inline-flex', 
-                        alignItems: 'center', 
-                        gap: '4px',
-                        padding: '4px 8px',
-                        borderRadius: '6px',
-                        background: 'rgba(59, 130, 246, 0.15)',
-                        color: '#3b82f6',
-                        fontSize: '12px',
-                        fontWeight: '500'
+                    <span
+                      key={tag}
+                      className="tag-pill"
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: "4px",
+                        padding: "4px 8px",
+                        borderRadius: "6px",
+                        background: "rgba(59, 130, 246, 0.15)",
+                        color: "#3b82f6",
+                        fontSize: "12px",
+                        fontWeight: "500",
                       }}
                     >
                       {tag}
@@ -586,12 +670,12 @@ export default function ProjectBoard({
                             });
                           }}
                           style={{
-                            background: 'transparent',
-                            border: 'none',
-                            cursor: 'pointer',
-                            color: '#ef4444',
-                            fontSize: '12px',
-                            padding: '0 2px',
+                            background: "transparent",
+                            border: "none",
+                            cursor: "pointer",
+                            color: "#ef4444",
+                            fontSize: "12px",
+                            padding: "0 2px",
                             lineHeight: 1,
                           }}
                           title="Убрать тег"
@@ -602,42 +686,81 @@ export default function ProjectBoard({
                     </span>
                   ))}
                   {(editTaskDraft.tags || []).length === 0 && (
-                    <span style={{ fontSize: '12.5px', color: 'var(--nav-text-inactive)', fontStyle: 'italic' }}>Нет тегов</span>
+                    <span
+                      style={{
+                        fontSize: "12.5px",
+                        color: "var(--nav-text-inactive)",
+                        fontStyle: "italic",
+                      }}
+                    >
+                      Нет тегов
+                    </span>
                   )}
                 </div>
 
                 {canEditTasks && (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  <div
+                    style={{
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: "6px",
+                    }}
+                  >
                     <select
                       value=""
                       onChange={(e) => {
                         const selectedTag = e.target.value;
-                        if (selectedTag && !(editTaskDraft.tags || []).includes(selectedTag)) {
+                        if (
+                          selectedTag &&
+                          !(editTaskDraft.tags || []).includes(selectedTag)
+                        ) {
                           setEditTaskDraft({
                             ...editTaskDraft,
                             tags: [...(editTaskDraft.tags || []), selectedTag],
                           });
                         }
                       }}
-                      style={{ padding: '8px 10px', fontSize: '13px', borderRadius: '6px', background: 'var(--bg-card)', border: '1px solid var(--border-color)', color: 'var(--text-primary)', outline: 'none', width: '100%', cursor: 'pointer' }}
+                      style={{
+                        padding: "8px 10px",
+                        fontSize: "13px",
+                        borderRadius: "6px",
+                        background: "var(--bg-card)",
+                        border: "1px solid var(--border-color)",
+                        color: "var(--text-primary)",
+                        outline: "none",
+                        width: "100%",
+                        cursor: "pointer",
+                      }}
                     >
                       <option value="">+ Выбрать из списка...</option>
                       {projectTags
-                        .filter((tag) => !(editTaskDraft.tags || []).includes(tag))
+                        .filter(
+                          (tag) => !(editTaskDraft.tags || []).includes(tag),
+                        )
                         .map((tag) => (
                           <option key={tag} value={tag}>
                             {tag}
                           </option>
                         ))}
                     </select>
-                    <div style={{ display: 'flex', gap: '2px', width: '100%' }}>
+                    <div style={{ display: "flex", gap: "2px", width: "100%" }}>
                       <input
                         type="text"
                         id="new-task-custom-tag-input"
                         placeholder="Новый тег"
-                        style={{ flex: 1, padding: '8px 10px', fontSize: '13px', borderRadius: '6px 0 0 6px', background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRight: 'none', color: 'var(--text-primary)', outline: 'none' }}
+                        style={{
+                          flex: 1,
+                          padding: "8px 10px",
+                          fontSize: "13px",
+                          borderRadius: "6px 0 0 6px",
+                          background: "var(--bg-card)",
+                          border: "1px solid var(--border-color)",
+                          borderRight: "none",
+                          color: "var(--text-primary)",
+                          outline: "none",
+                        }}
                         onKeyDown={(e) => {
-                          if (e.key === 'Enter') {
+                          if (e.key === "Enter") {
                             e.preventDefault();
                             const val = e.target.value.trim();
                             if (val) {
@@ -648,7 +771,7 @@ export default function ProjectBoard({
                                 });
                               }
                               onAddProjectTag(project.id, val);
-                              e.target.value = '';
+                              e.target.value = "";
                             }
                           }
                         }}
@@ -656,8 +779,10 @@ export default function ProjectBoard({
                       <button
                         type="button"
                         onClick={() => {
-                          const el = document.getElementById('new-task-custom-tag-input');
-                          const val = el ? el.value.trim() : '';
+                          const el = document.getElementById(
+                            "new-task-custom-tag-input",
+                          );
+                          const val = el ? el.value.trim() : "";
                           if (val) {
                             if (!(editTaskDraft.tags || []).includes(val)) {
                               setEditTaskDraft({
@@ -666,21 +791,21 @@ export default function ProjectBoard({
                               });
                             }
                             onAddProjectTag(project.id, val);
-                            if (el) el.value = '';
+                            if (el) el.value = "";
                           }
                         }}
                         style={{
-                          background: 'var(--accent-color)',
-                          border: 'none',
-                          color: '#fff',
-                          padding: '0 12px',
-                          borderRadius: '0 6px 6px 0',
-                          cursor: 'pointer',
-                          fontSize: '13px',
-                          fontWeight: 'bold',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
+                          background: "var(--accent-color)",
+                          border: "none",
+                          color: "#fff",
+                          padding: "0 12px",
+                          borderRadius: "0 6px 6px 0",
+                          cursor: "pointer",
+                          fontSize: "13px",
+                          fontWeight: "bold",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
                         }}
                       >
                         +
@@ -768,7 +893,11 @@ export default function ProjectBoard({
           </span>
           <div className="board-members">
             {members.map((m) => (
-              <Avatar key={m} name={getUserName(m)} avatarUrl={getUserAvatar(m)} />
+              <Avatar
+                key={m}
+                name={getUserName(m)}
+                avatarUrl={getUserAvatar(m)}
+              />
             ))}
           </div>
         </div>
@@ -821,8 +950,6 @@ export default function ProjectBoard({
               ⚙️ Настройки
             </button>
           </div>
-
-
         </div>
       </div>
 
@@ -907,22 +1034,6 @@ export default function ProjectBoard({
                 />
               </div>
 
-              {currentUserRole === "admin" && (
-                <button
-                  className="btn primary"
-                  onClick={() => {
-                    if (!projectNameDraft.trim()) return;
-                    onEditProject(project.id, {
-                      name: projectNameDraft.trim(),
-                      description: projectDescDraft.trim(),
-                    });
-                    alert("Изменения сохранены!");
-                  }}
-                  style={{ alignSelf: "flex-start" }}
-                >
-                  Сохранить настройки
-                </button>
-              )}
             </div>
 
             {/* Right Side: Members & Roles */}
@@ -970,7 +1081,10 @@ export default function ProjectBoard({
                           gap: "12px",
                         }}
                       >
-                        <Avatar name={getUserName(m.id)} avatarUrl={getUserAvatar(m.id)} />
+                        <Avatar
+                          name={getUserName(m.id)}
+                          avatarUrl={getUserAvatar(m.id)}
+                        />
                         <div
                           style={{ display: "flex", flexDirection: "column" }}
                         >
@@ -1134,10 +1248,16 @@ export default function ProjectBoard({
                     <button
                       className="btn primary small"
                       onClick={() => {
-                        if (!inviteUserIdDraft.trim()) return;
+                        const trimmedId = inviteUserIdDraft.trim();
+                        if (!trimmedId) return;
+                        // Запрещаем самоприглашение
+                        if (trimmedId.toUpperCase() === currentUserId.toUpperCase()) {
+                          alert("Нельзя пригласить самого себя.");
+                          return;
+                        }
                         const success = onInviteUser(
                           project.id,
-                          inviteUserIdDraft.trim(),
+                          trimmedId,
                           inviteUserRoleDraft,
                         );
                         if (success) {
@@ -1275,7 +1395,14 @@ export default function ProjectBoard({
                 )}
               </div>
 
-              <div style={{ display: "flex", gap: "12px", marginTop: "10px", flexWrap: "wrap" }}>
+              <div
+                style={{
+                  display: "flex",
+                  gap: "12px",
+                  marginTop: "10px",
+                  flexWrap: "wrap",
+                }}
+              >
                 <button
                   className="btn danger"
                   onClick={() => {
@@ -1294,25 +1421,57 @@ export default function ProjectBoard({
                 {currentUserRole === "admin" && (
                   <button
                     className="btn danger"
-                    onClick={() => {
-                      const password = window.prompt("Для удаления проекта введите ваш пароль от аккаунта:");
+                    onClick={async () => {
+                      const password = window.prompt(
+                        "Для удаления проекта введите ваш пароль от аккаунта:",
+                      );
                       if (password === null) return;
-                      
-                      const authUsers = JSON.parse(localStorage.getItem("auth_users") || "[]");
-                      const userRecord = authUsers.find(u => u.id === currentUserId);
-                      if (userRecord && password === userRecord.password) {
-                        if (window.confirm(`Вы уверены, что хотите полностью удалить проект "${project.name}"? Это действие со всеми его задачами абсолютно необратимо!`)) {
+
+                      const doDelete = () => {
+                        if (
+                          window.confirm(
+                            `Вы уверены, что хотите полностью удалить проект "${project.name}"? Это действие со всеми его задачами абсолютно необратимо!`,
+                          )
+                        ) {
                           onDeleteProject(project.id);
                         }
-                      } else {
-                        alert("Неверный пароль. Удаление отменено.");
+                      };
+
+                      try {
+                        const response = await fetch("/api/auth/login", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({
+                            login: currentUserId,
+                            password: password,
+                          }),
+                        });
+                        
+                        if (response.ok) {
+                          doDelete();
+                        } else {
+                          alert("Неверный пароль. Удаление отменено.");
+                        }
+                      } catch (err) {
+                        // Fallback to local check if backend is unavailable
+                        const authUsers = JSON.parse(
+                          localStorage.getItem("auth_users") || "[]",
+                        );
+                        const userRecord = authUsers.find(
+                          (u) => u.id === currentUserId,
+                        );
+                        if (userRecord && password === userRecord.password) {
+                          doDelete();
+                        } else {
+                          alert("Неверный пароль. Удаление отменено (локально).");
+                        }
                       }
                     }}
                     style={{
                       background: "rgba(239, 68, 68, 0.15)",
                       border: "1px solid #ef4444",
                       color: "#ef4444",
-                      alignSelf: "flex-start"
+                      alignSelf: "flex-start",
                     }}
                   >
                     🗑️ Удалить проект
@@ -1321,6 +1480,25 @@ export default function ProjectBoard({
               </div>
             </div>
           </div>
+          
+          {currentUserRole === "admin" && (
+            <div style={{ display: "flex", justifyContent: "center", marginTop: "30px", marginBottom: "20px" }}>
+              <button
+                className="btn primary"
+                onClick={() => {
+                  if (!projectNameDraft.trim()) return;
+                  onEditProject(project.id, {
+                    name: projectNameDraft.trim(),
+                    description: projectDescDraft.trim(),
+                  });
+                  alert("Изменения сохранены!");
+                }}
+                style={{ minWidth: "250px", fontSize: "16px", padding: "12px" }}
+              >
+                Сохранить настройки
+              </button>
+            </div>
+          )}
         </div>
       ) : (
         <div className="board-scroll">
@@ -1371,29 +1549,24 @@ export default function ProjectBoard({
                     autoFocus
                   />
                 ) : (
-                  <div
-                    className="column-title-clickable"
-                    onClick={() => {
-                      if (canManageColumns) {
-                        setEditingColumnId(column.id);
-                        setColumnNameDraft(column.name);
-                      }
-                    }}
-                    style={{ cursor: canManageColumns ? "pointer" : "default" }}
-                  >
-                    <h3 className="column-title">{column.name}</h3>
-                    <div
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: "8px",
+                  <div className="column-title-clickable" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%" }}>
+                    {/* Только название колонки открывает редактирование */}
+                    <h3
+                      className="column-title"
+                      onClick={() => {
+                        if (canManageColumns) {
+                          setEditingColumnId(column.id);
+                          setColumnNameDraft(column.name);
+                        }
                       }}
+                      style={{ cursor: canManageColumns ? "pointer" : "default", flex: 1, margin: 0 }}
+                      title={canManageColumns ? "Нажмите для переименования" : undefined}
                     >
+                      {column.name}
+                    </h3>
+                    <div style={{ display: "flex", alignItems: "center", gap: "6px", flexShrink: 0 }}>
                       {canManageColumns && (
-                        <div
-                          className="column-arrows"
-                          style={{ display: "flex", gap: "2px" }}
-                        >
+                        <div className="column-arrows" style={{ display: "flex", gap: "2px" }}>
                           <button
                             className="btn icon-btn"
                             onClick={(e) => {
@@ -1402,13 +1575,7 @@ export default function ProjectBoard({
                             }}
                             disabled={colIndex === 0}
                             title="Переместить влево"
-                            style={{
-                              padding: "2px 4px",
-                              fontSize: "11px",
-                              opacity: colIndex === 0 ? 0.25 : 0.7,
-                              cursor:
-                                colIndex === 0 ? "not-allowed" : "pointer",
-                            }}
+                            style={{ padding: "2px 4px", fontSize: "11px", opacity: colIndex === 0 ? 0.25 : 0.7 }}
                           >
                             ◀
                           </button>
@@ -1420,36 +1587,19 @@ export default function ProjectBoard({
                             }}
                             disabled={colIndex === project.columns.length - 1}
                             title="Переместить вправо"
-                            style={{
-                              padding: "2px 4px",
-                              fontSize: "11px",
-                              opacity:
-                                colIndex === project.columns.length - 1
-                                  ? 0.25
-                                  : 0.7,
-                              cursor:
-                                colIndex === project.columns.length - 1
-                                  ? "not-allowed"
-                                  : "pointer",
-                            }}
+                            style={{ padding: "2px 4px", fontSize: "11px", opacity: colIndex === project.columns.length - 1 ? 0.25 : 0.7 }}
                           >
                             ▶
                           </button>
                         </div>
                       )}
-                      <span className="task-count">
-                        {column.taskIds.length}
-                      </span>
+                      <span className="task-count">{column.taskIds.length}</span>
                       {canManageColumns && (
                         <button
                           className="btn icon-btn danger"
                           onClick={(e) => {
                             e.stopPropagation();
-                            if (
-                              window.confirm(
-                                "Удалить эту колонку? Все задачи в ней также будут удалены.",
-                              )
-                            ) {
+                            if (window.confirm("Удалить эту колонку? Все задачи в ней также будут удалены.")) {
                               onDeleteColumn(project.id, column.id);
                             }
                           }}
@@ -1504,7 +1654,9 @@ export default function ProjectBoard({
                               padding: 0,
                               marginTop: "1px",
                               lineHeight: 1,
-                              color: task.completed ? "var(--accent-color)" : "var(--nav-text-inactive)",
+                              color: task.completed
+                                ? "var(--accent-color)"
+                                : "var(--nav-text-inactive)",
                               transition: "color 0.2s, transform 0.1s",
                               outline: "none",
                             }}
@@ -1526,7 +1678,9 @@ export default function ProjectBoard({
                             fontSize: "14px",
                             fontWeight: "600",
                             color: "var(--text-primary)",
-                            textDecoration: task.completed ? "line-through" : "none",
+                            textDecoration: task.completed
+                              ? "line-through"
+                              : "none",
                             opacity: task.completed ? 0.6 : 1,
                             lineHeight: "1.4",
                           }}
@@ -1536,7 +1690,10 @@ export default function ProjectBoard({
                       </div>
 
                       {task.tags && task.tags.length > 0 && (
-                        <div className="task-card-tags" style={{ marginBottom: "6px" }}>
+                        <div
+                          className="task-card-tags"
+                          style={{ marginBottom: "6px" }}
+                        >
                           {task.tags.map((tag) => (
                             <span key={tag} className="tag-pill">
                               {tag}
@@ -1545,8 +1702,13 @@ export default function ProjectBoard({
                         </div>
                       )}
 
-                      <div className="task-card-badges" style={{ marginBottom: "8px" }}>
-                        {(task.priority === "Срочно" || task.priority === "Критичный" || task.priority === "Высокий") && (
+                      <div
+                        className="task-card-badges"
+                        style={{ marginBottom: "8px" }}
+                      >
+                        {(task.priority === "Срочно" ||
+                          task.priority === "Критичный" ||
+                          task.priority === "Высокий") && (
                           <span
                             className="badge-pill priority-critical"
                             style={{
@@ -1575,10 +1737,7 @@ export default function ProjectBoard({
                           {task.deadline && (
                             <span className="meta-icon due-date">
                               📅{" "}
-                              {new Date(task.deadline).toLocaleDateString(
-                                "ru-RU",
-                                { day: "numeric", month: "short" },
-                              )}
+                              {new Date(task.deadline).toLocaleDateString("ru-RU", { day: "numeric", month: "short", year: "numeric" })}
                             </span>
                           )}
                           {task.comments?.length > 0 && (
@@ -1589,7 +1748,9 @@ export default function ProjectBoard({
                         </div>
                         <Avatar
                           name={getUserName(task.assignedTo || "Unassigned")}
-                          avatarUrl={getUserAvatar(task.assignedTo || "Unassigned")}
+                          avatarUrl={getUserAvatar(
+                            task.assignedTo || "Unassigned",
+                          )}
                         />
                       </div>
                     </div>

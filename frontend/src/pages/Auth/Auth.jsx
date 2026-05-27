@@ -47,7 +47,8 @@ export default function Auth({ onLoginSuccess }) {
             const sessionData = {
               id: data.user.id,
               name: data.user.name,
-              email: data.user.email
+              email: data.user.email,
+              avatar: data.user.avatar || null
             };
             localStorage.setItem("active_user_session", JSON.stringify(sessionData));
             onLoginSuccess(sessionData);
@@ -99,7 +100,8 @@ export default function Auth({ onLoginSuccess }) {
       const sessionData = {
         id: data.user.id,
         name: data.user.name,
-        email: data.user.email
+        email: data.user.email,
+        avatar: data.user.avatar || null
       };
       localStorage.setItem("active_user_session", JSON.stringify(sessionData));
 
@@ -233,7 +235,8 @@ export default function Auth({ onLoginSuccess }) {
       const sessionData = {
         id: data.user.id,
         name: data.user.name,
-        email: data.user.email
+        email: data.user.email,
+        avatar: data.user.avatar || null
       };
       localStorage.setItem("active_user_session", JSON.stringify(sessionData));
 

@@ -87,28 +87,28 @@ async def get_current_user(authorization: Optional[str] = Header(None)) -> Optio
     """Извлекаем текущего пользователя из JWT токена в заголовке Authorization."""
     if not authorization:
         return None
-    
+
     # Формат: "Bearer <token>"
     parts = authorization.split()
     if len(parts) != 2 or parts[0].lower() != "bearer":
         return None
-    
+
     token = parts[1]
     payload = decode_access_token(token)
     if not payload:
         return None
-    
+
     user_id = payload.get("sub")
     if not user_id:
         return None
-    
+
     user = await database.fetch_one(
         "SELECT user_id, user_name, user_email FROM user_ WHERE user_id = :uid",
         {"uid": user_id}
     )
     if not user:
         return None
-    
+
     return {"user_id": user["user_id"], "user_name": user["user_name"], "user_email": user["user_email"]}
 
 
@@ -205,9 +205,9 @@ async def login_user(data: dict = Body(...)):
 
     # Ищем пользователя по ID или email
     user = await database.fetch_one(
-        """SELECT user_id, user_name, user_email, password_hash 
-           FROM user_ 
-           WHERE UPPER(user_id) = :login_upper 
+        """SELECT user_id, user_name, user_email, password_hash, avatar
+           FROM user_
+           WHERE UPPER(user_id) = :login_upper
               OR LOWER(user_email) = :login_lower""",
         {"login_upper": login_input.upper(), "login_lower": login_input.lower()}
     )
@@ -231,7 +231,8 @@ async def login_user(data: dict = Body(...)):
         "user": {
             "id": user["user_id"],
             "name": user["user_name"],
-            "email": user["user_email"]
+            "email": user["user_email"],
+            "avatar": user["avatar"]
         },
         "access_token": access_token,
         "token_type": "bearer"
@@ -246,13 +247,14 @@ async def get_me(current_user: Optional[dict] = Depends(get_current_user)):
     """Фронтенд отправляет JWT токен → бэкенд расшифровывает и возвращает данные пользователя."""
     if not current_user:
         raise HTTPException(status_code=401, detail="Невалидный или истекший токен")
-    
+
     return {
         "status": "success",
         "user": {
             "id": current_user["user_id"],
             "name": current_user["user_name"],
-            "email": current_user["user_email"]
+            "email": current_user["user_email"],
+            "avatar": current_user.get("avatar")
         }
     }
 
@@ -266,18 +268,18 @@ async def get_user_profile(userId: str = None, current_user: Optional[dict] = De
     target_id = userId
     if not target_id and current_user:
         target_id = current_user["user_id"]
-    
+
     if target_id:
         user = await database.fetch_one(
-            "SELECT user_name, user_email FROM user_ WHERE UPPER(user_id) = :uid",
+            "SELECT user_name, user_email, avatar FROM user_ WHERE UPPER(user_id) = :uid",
             {"uid": target_id.upper()}
         )
         if user:
-            return {"displayName": user["user_name"], "email": user["user_email"]}
-    
-    first = await database.fetch_one("SELECT user_name, user_email FROM user_ LIMIT 1")
+            return {"displayName": user["user_name"], "email": user["user_email"], "avatar": user["avatar"]}
+
+    first = await database.fetch_one("SELECT user_name, user_email, avatar FROM user_ LIMIT 1")
     if first:
-        return {"displayName": first["user_name"], "email": first["user_email"]}
+        return {"displayName": first["user_name"], "email": first["user_email"], "avatar": first["avatar"]}
     return {"displayName": "Алексей Смирнов", "email": "alex@example.com"}
 
 
@@ -314,29 +316,35 @@ async def update_user_profile(data: dict = Body(...)):
 # =============================================================================
 @app.post("/api/auth/change-password")
 async def change_password(data: dict = Body(...)):
-    """Смена пароля: хешируем новый пароль и сохраняем в БД."""
+    """Смена пароля: проверяем текущий пароль через bcrypt, затем хешируем новый."""
     user_id = data.get("userId", "").strip()
+    current_password = data.get("currentPassword", "")
     new_password = data.get("newPassword", "")
     email = data.get("email", "").strip()
 
     if not new_password:
         raise HTTPException(status_code=400, detail="Новый пароль обязателен")
 
-    # Находим пользователя
+    # Находим пользователя вместе с хешем пароля
     user = None
     if user_id:
         user = await database.fetch_one(
-            "SELECT user_id FROM user_ WHERE UPPER(user_id) = :uid",
+            "SELECT user_id, password_hash FROM user_ WHERE UPPER(user_id) = :uid",
             {"uid": user_id.upper()}
         )
     elif email:
         user = await database.fetch_one(
-            "SELECT user_id FROM user_ WHERE LOWER(user_email) = :email",
+            "SELECT user_id, password_hash FROM user_ WHERE LOWER(user_email) = :email",
             {"email": email.lower()}
         )
 
     if not user:
         raise HTTPException(status_code=404, detail="Пользователь не найден")
+
+    # 🔐 Проверяем текущий пароль через bcrypt
+    if current_password:
+        if not verify_password(current_password, user["password_hash"]):
+            raise HTTPException(status_code=401, detail="Текущий пароль введён неверно")
 
     # 🔐 Хешируем новый пароль
     new_hash = hash_password(new_password)

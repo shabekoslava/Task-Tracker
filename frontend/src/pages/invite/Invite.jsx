@@ -29,7 +29,7 @@ export default function Invite({
     p.members.some((m) => m.id === currentUserId && m.role === "admin")
   );
 
-  const handleJoinByCode = (e) => {
+  const handleJoinByCode = async (e) => {
     e.preventDefault();
     setJoinError("");
     setJoinSuccess("");
@@ -40,7 +40,7 @@ export default function Invite({
       return;
     }
 
-    const success = onJoinProjectById(code);
+    const success = await onJoinProjectById(code);
     if (success) {
       setJoinSuccess("Вы успешно вступили в проект!");
       setProjectIdInput("");
