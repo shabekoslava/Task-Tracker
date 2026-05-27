@@ -719,7 +719,7 @@ async def join_project(data: dict = Body(...), user_id: Optional[str] = Depends(
     if not user_id:
         raise HTTPException(status_code=401, detail="Not authenticated")
     project_id = data.get("projectId")
-    role = data.get("role", "member")
+    role = data.get("role", "viewer")
     if not project_id:
         raise HTTPException(status_code=400, detail="projectId required")
     

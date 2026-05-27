@@ -337,8 +337,12 @@ export default function App() {
 
   // Update window title dynamically
   useEffect(() => {
-    document.title = `${currentTab} — Task Tracker`;
-  }, [currentTab]);
+    if (currentTab.startsWith("project-") && selectedProject) {
+      document.title = `${selectedProject.name} — Task Tracker`;
+    } else {
+      document.title = `${currentTab} — Task Tracker`;
+    }
+  }, [currentTab, selectedProject]);
 
   const toggleTheme = () => {
     setIsDark(!isDark);
@@ -359,7 +363,7 @@ export default function App() {
   };
 
   // --- Invitation Callbacks ---
-  const handleJoinProjectById = async (projectId, role = "member") => {
+  const handleJoinProjectById = async (projectId, role = "viewer") => {
     // Check if already a member locally first
     const targetProject = projects.find((p) => p.id === projectId);
     if (targetProject && targetProject.members.some((m) => m.id === currentUserId)) {

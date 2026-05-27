@@ -342,7 +342,12 @@ export default function Messenger({
       // Для чата задачи: только вызываем onAddComment.
       // Комментарий отобразится через task.comments → getRoomMessages()
       // и не будет дублироваться как plain message.
-      onAddComment(activeRoom.projectId, activeRoom.taskId, trimmedMsg, "messenger");
+      onAddComment(
+        activeRoom.projectId,
+        activeRoom.taskId,
+        trimmedMsg,
+        "messenger",
+      );
       setMessageText("");
       return;
     }
@@ -522,14 +527,14 @@ export default function Messenger({
               onClick={() => setIsNewPersonalModalOpen(true)}
               title="Создать личный чат"
             >
-              💬 +1
+              + Личный
             </button>
             <button
               className="btn done-btn-primary small icon-btn-add"
               onClick={() => setIsNewGroupModalOpen(true)}
               title="Создать групповой чат"
             >
-              👥 +Гр
+              + Группа
             </button>
           </div>
         </div>
@@ -857,28 +862,25 @@ export default function Messenger({
                 {(activeRoom.type === "personal" ||
                   activeRoom.type === "group") && (
                   <button
-                    className="btn danger small"
+                    className="chat-action-btn leave"
                     onClick={() => handleLeaveChat(activeRoom.id)}
-                    style={{
-                      padding: "6px 12px",
-                      fontSize: "12px",
-                      display: "inline-flex",
-                      alignItems: "center",
-                      gap: "4px",
-                    }}
                   >
-                    🚪 Выйти из чата
+                    Выйти из чата
                   </button>
                 )}
                 {activeRoom.type === "group" && (
                   <button
-                    className="btn primary small"
+                    className="chat-action-btn"
                     onClick={() => {
-                      const userId = window.prompt("Введите ID пользователя для добавления в группу:");
+                      const userId = window.prompt(
+                        "Введите ID пользователя для добавления в группу:",
+                      );
                       if (userId && userId.trim()) {
                         const trimmedId = userId.trim();
                         // Ищем пользователя
-                        const foundUser = allRegisteredUsers.find((u) => u.id === trimmedId);
+                        const foundUser = allRegisteredUsers.find(
+                          (u) => u.id === trimmedId,
+                        );
                         if (!foundUser) {
                           alert("Пользователь с таким ID не найден.");
                           return;
@@ -887,7 +889,7 @@ export default function Messenger({
                           alert("Пользователь уже в группе.");
                           return;
                         }
-                        
+
                         setChats((prev) =>
                           prev.map((r) => {
                             if (r.id !== activeRoom.id) return r;
@@ -902,39 +904,34 @@ export default function Messenger({
                                   createdAt: new Date().toISOString(),
                                   authorId: "System",
                                   status: "read",
-                                }
-                              ]
+                                },
+                              ],
                             };
-                          })
+                          }),
                         );
-                        alert(`Пользователь ${foundUser.name} добавлен в группу!`);
+                        alert(
+                          `Пользователь ${foundUser.name} добавлен в группу!`,
+                        );
                       }
                     }}
-                    style={{
-                      padding: "6px 12px",
-                      fontSize: "12px",
-                      display: "inline-flex",
-                      alignItems: "center",
-                      gap: "4px",
-                    }}
                   >
-                    ➕ Добавить участника
+                    Добавить участника
                   </button>
                 )}
                 {activeRoom.type === "project" && (
                   <button
-                    className="btn primary small"
+                    className="chat-action-btn"
                     onClick={() => openProject(activeRoom.projectId)}
                   >
-                    📂 Доска проекта
+                    Доска проекта
                   </button>
                 )}
                 {activeRoom.type === "task" && (
                   <button
-                    className="btn primary small"
+                    className="chat-action-btn"
                     onClick={() => openProject(activeRoom.projectId)}
                   >
-                    🎯 Перейти к задаче
+                    К задаче
                   </button>
                 )}
               </div>
@@ -1292,8 +1289,10 @@ export default function Messenger({
             </div>
             <div className="modal-body">
               <p>Укажите ID пользователя или выберите из коллег:</p>
-              
-              <div style={{ display: "flex", gap: "8px", marginBottom: "16px" }}>
+
+              <div
+                style={{ display: "flex", gap: "8px", marginBottom: "16px" }}
+              >
                 <input
                   type="text"
                   placeholder="Введите точный ID пользователя..."
@@ -1316,7 +1315,9 @@ export default function Messenger({
                 <button
                   className="btn primary small"
                   disabled={!personalSearchId.trim()}
-                  onClick={() => handleCreatePersonalChat(personalSearchId.trim())}
+                  onClick={() =>
+                    handleCreatePersonalChat(personalSearchId.trim())
+                  }
                 >
                   Найти
                 </button>

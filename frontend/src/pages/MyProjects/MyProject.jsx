@@ -56,6 +56,12 @@ export default function MyProjects({
     return found ? found.name : userId;
   };
 
+  const getUserAvatar = (userId) => {
+    if (!userId) return null;
+    const found = allUsers.find((u) => u.id === userId);
+    return found ? found.avatar : null;
+  };
+
   return (
     <div className="page-fade-in projects-page">
       <div className="projects-header">
@@ -165,7 +171,11 @@ export default function MyProjects({
                             <div className="member-item" key={member.id}>
                               <div className="member-info">
                                 <div className="member-avatar" title={getUserName(member.id)}>
-                                  {getUserName(member.id).substring(0, 2).toUpperCase()}
+                                  {getUserAvatar(member.id) ? (
+                                    <img src={getUserAvatar(member.id)} alt="avatar" style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 'inherit' }} />
+                                  ) : (
+                                    getUserName(member.id).substring(0, 2).toUpperCase()
+                                  )}
                                 </div>
                                 <span className="member-name">
                                   {getUserName(member.id)} <span className="member-id-paren">({member.id})</span> {member.id === currentUserId && "(Вы)"}

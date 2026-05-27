@@ -17,7 +17,7 @@
   display: flex;
   flex-direction: column;
   backdrop-filter: blur(10px);
-  box-shadow: 0 8px 32px rgba(0,0,0,0.15);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
 }
 
 .sidebar-header-area {
@@ -41,10 +41,50 @@
 }
 
 .icon-btn-add {
-  padding: 6px 10px !important;
+  padding: 5px 10px !important;
   font-size: 12px !important;
   font-weight: 600;
   border-radius: 8px;
+  background: rgba(59, 130, 246, 0.1) !important;
+  border: 1px solid rgba(59, 130, 246, 0.25) !important;
+  color: #93b4f5 !important;
+  transition: all 0.2s ease;
+}
+.icon-btn-add:hover {
+  background: rgba(59, 130, 246, 0.18) !important;
+  border-color: rgba(59, 130, 246, 0.4) !important;
+  color: #bdd0fa !important;
+}
+
+/* Context action buttons in chat header */
+.chat-action-btn {
+  background: rgba(99, 102, 241, 0.1);
+  border: 1px solid rgba(99, 102, 241, 0.22);
+  color: #a5a8fc;
+  border-radius: 8px;
+  padding: 6px 14px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.chat-action-btn:hover {
+  background: rgba(99, 102, 241, 0.18);
+  border-color: rgba(99, 102, 241, 0.4);
+  color: #c7c9fd;
+}
+.chat-action-btn.leave {
+  background: rgba(239, 68, 68, 0.08);
+  color: #f07070;
+  border-color: rgba(239, 68, 68, 0.22);
+}
+.chat-action-btn.leave:hover {
+  background: rgba(239, 68, 68, 0.15);
+  border-color: rgba(239, 68, 68, 0.4);
+  color: #f8a0a0;
 }
 
 .sidebar-channels-scroll {
@@ -133,7 +173,7 @@
   display: flex;
   flex-direction: column;
   backdrop-filter: blur(10px);
-  box-shadow: 0 8px 32px rgba(0,0,0,0.15);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
   overflow: hidden;
 }
 
@@ -143,7 +183,7 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
-  background: rgba(255,255,255,0.01);
+  background: rgba(255, 255, 255, 0.01);
 }
 
 .room-header-info {
@@ -274,14 +314,14 @@
 }
 
 .message-bubble-text {
-  background: rgba(255,255,255,0.04);
+  background: rgba(255, 255, 255, 0.04);
   color: var(--text-primary);
   padding: 12px 16px;
   border-radius: 12px;
   border-top-left-radius: 0;
   font-size: 14px;
   line-height: 1.5;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
   border: 1px solid var(--border-color);
   position: relative;
 }
@@ -332,7 +372,7 @@
 /* Input Bar */
 .chat-input-bar {
   padding: 16px 24px;
-  background: rgba(255,255,255,0.01);
+  background: rgba(255, 255, 255, 0.01);
   border-top: 1px solid var(--border-color);
   display: flex;
   gap: 12px;
@@ -396,7 +436,7 @@
   flex-direction: column;
   gap: 12px;
   backdrop-filter: blur(10px);
-  box-shadow: 0 8px 32px rgba(0,0,0,0.15);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
 }
 
 .tech-block h4 {
@@ -483,7 +523,7 @@
   align-items: center;
   gap: 12px;
   padding: 10px;
-  background: rgba(255,255,255,0.02);
+  background: rgba(255, 255, 255, 0.02);
   border: 1px solid var(--border-color);
   border-radius: 8px;
   cursor: pointer;
@@ -533,7 +573,7 @@
   gap: 8px;
   max-height: 180px;
   overflow-y: auto;
-  background: rgba(0,0,0,0.1);
+  background: rgba(0, 0, 0, 0.1);
   padding: 10px;
   border-radius: 8px;
   border: 1px solid var(--border-color);
@@ -696,4 +736,3 @@
   background: rgba(255, 255, 255, 0.1);
   border-radius: 3px;
 }
-
