@@ -2,6 +2,7 @@
 import os
 import traceback
 import json
+import asyncio
 from typing import List, Dict, Any, Optional
 from fastapi import FastAPI, Body, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -36,7 +37,36 @@ app.add_middleware(
 
 # Инициализация Kafka продюсера
 KAFKA_BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS")
+KAFKA_SEND_TIMEOUT_SEC = 5
 producer = None
+
+
+async def ensure_producer():
+    """Возвращает запущенный Kafka продюсер или None.
+    Если Kafka ещё не поднялась (например, при старте docker compose),
+    продюсер не сохраняется — попытка подключения повторится при следующем вызове."""
+    global producer
+    if producer or not KAFKA_BOOTSTRAP_SERVERS:
+        return producer
+    candidate = None
+    try:
+        from aiokafka import AIOKafkaProducer
+        candidate = AIOKafkaProducer(
+            bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS,
+            value_serializer=lambda v: json.dumps(v).encode("utf-8"),
+            request_timeout_ms=KAFKA_SEND_TIMEOUT_SEC * 1000,
+        )
+        await asyncio.wait_for(candidate.start(), timeout=KAFKA_SEND_TIMEOUT_SEC)
+        producer = candidate
+        print(f"⚡ Kafka Producer запущен (брокер: {KAFKA_BOOTSTRAP_SERVERS})", flush=True)
+    except Exception as e:
+        print(f"⚠️ Не удалось подключить Kafka Producer: {e!r}", flush=True)
+        if candidate:
+            try:
+                await candidate.stop()
+            except Exception:
+                pass
+    return producer
 
 @app.on_event("startup")
 async def startup():
@@ -82,19 +112,8 @@ async def startup():
         except Exception as e:
             print(f"⚠️ Не удалось добавить колонку avatar: {e}")
 
-    # 2. Инициализация Kafka
-    global producer
-    if KAFKA_BOOTSTRAP_SERVERS:
-        try:
-            from aiokafka import AIOKafkaProducer
-            producer = AIOKafkaProducer(
-                bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS,
-                value_serializer=lambda v: json.dumps(v).encode("utf-8")
-            )
-            await producer.start()
-            print(f"⚡ Kafka Producer запущен (брокер: {KAFKA_BOOTSTRAP_SERVERS})")
-        except Exception as e:
-            print(f"⚠️ Не удалось подключить Kafka Producer: {e}")
+    # 2. Инициализация Kafka (если брокер ещё не готов — переподключимся при первом /api/sync)
+    await ensure_producer()
 
 @app.on_event("shutdown")
 async def shutdown():
@@ -611,14 +630,17 @@ async def sync_data(data: dict = Body(...)):
     try:
         await save_full_state(data)
 
-        # 📣 Отправляем событие в Kafka!
-        global producer
-        if producer:
+        # 📣 Отправляем событие в Kafka! Ошибка Kafka не должна ломать сохранение данных.
+        kafka = await ensure_producer()
+        if kafka:
             try:
-                await producer.send_and_wait("board-updates", {"event": "state_synced"})
-                print("📣 Событие state_synced отправлено в Kafka!")
+                await asyncio.wait_for(
+                    kafka.send_and_wait("board-updates", {"event": "state_synced"}),
+                    timeout=KAFKA_SEND_TIMEOUT_SEC,
+                )
+                print("📣 Событие state_synced отправлено в Kafka!", flush=True)
             except Exception as ke:
-                print(f"⚠️ Не удалось отправить событие в Kafka: {ke}")
+                print(f"⚠️ Не удалось отправить событие в Kafka: {ke!r}", flush=True)
 
         return {"status": "success", "message": "State synchronized successfully"}
     except Exception as e:

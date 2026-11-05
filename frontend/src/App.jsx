@@ -46,6 +46,9 @@ export default function App() {
 
   const wsRef = useRef(null);
   const isIncomingSyncRef = useRef(false);
+  // Пока состояние не загружено с сервера, ничего не пушим: /api/sync перезаписывает
+  // всю базу, и пустой localStorage нового браузера стёр бы все проекты.
+  const isServerStateLoadedRef = useRef(false);
 
   // ⚡ Initialize Reconnecting WebSocket Connection for Real-Time State Sync
   useEffect(() => {
@@ -150,6 +153,7 @@ export default function App() {
       })
       .then((data) => {
         console.log("State synchronized from FastAPI:", data);
+        isServerStateLoadedRef.current = true;
         if (data.projects) {
           localStorage.setItem(
             "project_tracker_projects",
@@ -196,6 +200,8 @@ export default function App() {
       return;
     }
 
+    if (!isServerStateLoadedRef.current) return;
+
     // Broadcast state mutation to other clients over WebSocket
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       wsRef.current.send(
@@ -228,6 +234,8 @@ export default function App() {
       }, 100);
       return;
     }
+
+    if (!isServerStateLoadedRef.current) return;
 
     // Background push to backend
     fetch("/api/sync", {
