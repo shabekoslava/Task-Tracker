@@ -3,18 +3,24 @@ import os
 import traceback
 import json
 import asyncio
-from typing import List, Dict, Any, Optional
-from fastapi import FastAPI, Body, HTTPException
+import secrets
+from typing import Optional
+from fastapi import FastAPI, Body, HTTPException, Depends, Header
 from fastapi.middleware.cors import CORSMiddleware
 import databases
 import bcrypt
-from datetime import datetime
+from jose import jwt, JWTError
+from datetime import datetime, timezone
 
 DATABASE_URL = os.getenv(
     "DATABASE_URL",
-    "postgresql+asyncpg://postgres:Slava2005@localhost:5432/task_tracker_bd"
+    "postgresql+asyncpg://postgres:postgres@localhost:5432/task_tracker_bd"
 )
 PASSWORD_PEPPER = os.getenv("PASSWORD_PEPPER", "")
+# bcrypt учитывает только первые 72 байта и в новых версиях падает на более длинных
+BCRYPT_MAX_BYTES = 72
+JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "dev-secret-key-CHANGE-IN-PROD")
+JWT_ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
 
 database = databases.Database(DATABASE_URL)
 
@@ -23,8 +29,14 @@ def hash_password(plain_password: str) -> str:
     """Хешируем пароль bcrypt + pepper."""
     peppered = plain_password + PASSWORD_PEPPER
     salt = bcrypt.gensalt(rounds=12)
-    hashed = bcrypt.hashpw(peppered.encode("utf-8"), salt)
+    hashed = bcrypt.hashpw(peppered.encode("utf-8")[:BCRYPT_MAX_BYTES], salt)
     return hashed.decode("utf-8")
+
+
+# Хеш случайного пароля для пользователей, которых board-service создаёт сам
+# (например, упомянутых в приглашении до регистрации). Считается один раз:
+# bcrypt медленный, а раньше он вызывался на каждого пользователя при каждом /api/sync.
+PLACEHOLDER_PASSWORD_HASH = hash_password(secrets.token_urlsafe(24))
 
 app = FastAPI(title="Board & Project Service")
 
@@ -108,7 +120,8 @@ async def startup():
         # Миграция: добавляем avatar если его нет
         try:
             await database.execute("ALTER TABLE user_ ADD COLUMN IF NOT EXISTS avatar TEXT;")
-            print("🚀 Миграция: колонка avatar успешно добавлена (или уже существует).")
+            await database.execute("ALTER TABLE task ADD COLUMN IF NOT EXISTS position INT NOT NULL DEFAULT 0;")
+            print("🚀 Миграции применены (user_.avatar, task.position).")
         except Exception as e:
             print(f"⚠️ Не удалось добавить колонку avatar: {e}")
 
@@ -118,9 +131,25 @@ async def startup():
 @app.on_event("shutdown")
 async def shutdown():
     await database.disconnect()
-    global producer
     if producer:
         await producer.stop()
+
+# =============================================================================
+# Авторизация (JWT выдаёт auth-service, здесь только проверяем подпись)
+# =============================================================================
+async def require_user(authorization: Optional[str] = Header(None)) -> str:
+    scheme, _, token = (authorization or "").partition(" ")
+    if scheme.lower() != "bearer" or not token:
+        raise HTTPException(status_code=401, detail="Требуется авторизация")
+    try:
+        payload = jwt.decode(token, JWT_SECRET_KEY, algorithms=[JWT_ALGORITHM])
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Невалидный или истекший токен")
+    user_id = payload.get("sub")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Невалидный токен")
+    return user_id
+
 
 # =============================================================================
 # Вспомогательные функции
@@ -130,519 +159,439 @@ def parse_datetime(val) -> Optional[datetime]:
         return None
     if isinstance(val, datetime):
         return val
-    try:
-        if isinstance(val, str):
-            val_str = val.replace("Z", "+00:00")
+    if isinstance(val, str):
+        val_str = val.replace("Z", "+00:00")
+        try:
+            return datetime.fromisoformat(val_str)
+        except ValueError:
             try:
-                return datetime.fromisoformat(val_str)
+                return datetime.strptime(val_str[:10], "%Y-%m-%d")
             except ValueError:
-                return datetime.strptime(val_str, "%Y-%m-%d")
-    except Exception:
-        pass
+                return None
     return None
 
-async def ensure_user_exists(user_id: Optional[str]) -> Optional[str]:
-    if not user_id or not user_id.strip():
-        return None
-    existing = await database.fetch_one(
-        "SELECT user_id FROM user_ WHERE UPPER(user_id) = :uid",
-        {"uid": user_id.upper()}
-    )
-    if not existing:
-        temp_hash = hash_password("temp_password")
-        await database.execute(
-            """INSERT INTO user_ (user_id, user_name, user_email, password_hash)
-               VALUES (:uid, :name, :email, :pwd)
-               ON CONFLICT (user_id) DO NOTHING""",
-            {"uid": user_id, "name": f"Пользователь {user_id}",
-             "email": f"{user_id}@example.com", "pwd": temp_hash}
-        )
-        return user_id
-    return existing["user_id"]
 
-async def ensure_tag_state_exists(tag_id: int, state_name: str) -> str:
-    existing = await database.fetch_one(
-        "SELECT tag_state FROM tag_state WHERE tag_id = :tid AND tag_state = :state",
-        {"tid": tag_id, "state": state_name}
-    )
-    if not existing:
-        await database.execute(
-            """INSERT INTO tag_state (tag_id, tag_state, tag_state_color)
-               VALUES (:tid, :state, :color)
-               ON CONFLICT (tag_id, tag_state) DO NOTHING""",
-            {"tid": tag_id, "state": state_name, "color": "#808080"}
-        )
-    return state_name
+def to_iso(val) -> str:
+    if isinstance(val, datetime):
+        return val.isoformat()
+    return str(val) if val else ""
 
-def _find_column_for_task(columns_list: list, task_id: str) -> Optional[str]:
-    for col in columns_list:
-        tasks_list = col.get("taskIds", col.get("tasks", []))
-        for tid in tasks_list:
-            if tid == task_id:
-                return col["id"]
-    return None
 
+def to_date(val) -> str:
+    """Дедлайн отдаём датой (YYYY-MM-DD) — в таком виде его понимает <input type="date">."""
+    if isinstance(val, datetime):
+        return val.date().isoformat()
+    return str(val)[:10] if val else ""
+
+
+class UserCache:
+    """Гарантирует наличие пользователей в user_ (нужно для внешних ключей).
+    Создаётся на один вызов save_full_state, чтобы не ходить в БД за одним и тем же id."""
+
+    def __init__(self):
+        self.known: dict = {}
+
+    async def load(self):
+        rows = await database.fetch_all("SELECT user_id FROM user_")
+        self.known = {r["user_id"].upper(): r["user_id"] for r in rows}
+
+    async def ensure(self, user_id: Optional[str]) -> Optional[str]:
+        if not user_id or not str(user_id).strip():
+            return None
+        key = str(user_id).upper()
+        if key not in self.known:
+            # Пароль — случайный хеш, вычисленный один раз при старте: войти под таким
+            # пользователем нельзя, пока он не зарегистрируется сам.
+            await database.execute(
+                """INSERT INTO user_ (user_id, user_name, user_email, password_hash)
+                   VALUES (:uid, :name, :email, :pwd)
+                   ON CONFLICT (user_id) DO NOTHING""",
+                {"uid": user_id, "name": f"Пользователь {user_id}",
+                 "email": f"{user_id}@example.com", "pwd": PLACEHOLDER_PASSWORD_HASH}
+            )
+            self.known[key] = user_id
+        return self.known[key]
+
+
+def group_by(rows, key: str) -> dict:
+    grouped: dict = {}
+    for row in rows:
+        grouped.setdefault(row[key], []).append(row)
+    return grouped
+
+
+# =============================================================================
+# Чтение состояния: фиксированное число запросов вместо запросов на каждую задачу
+# =============================================================================
 async def build_full_state() -> dict:
-    # Пользователи (⚠️ пароли НЕ возвращаем на фронтенд!)
     users = await database.fetch_all("SELECT user_id, user_name, user_email, avatar FROM user_")
-    users_list = [
-        {"id": u["user_id"], "name": u["user_name"], "email": u["user_email"], "avatar": u["avatar"]}
-        for u in users
-    ]
+    projects = await database.fetch_all("SELECT * FROM project ORDER BY created_at, project_id")
+    columns = group_by(await database.fetch_all(
+        "SELECT column_id, project_id, column_name, position FROM project_column ORDER BY position, column_id"
+    ), "project_id")
+    tasks = await database.fetch_all("SELECT * FROM task ORDER BY position, created_at")
+    performers = group_by(await database.fetch_all("SELECT task_id, performer_id FROM task_performer"), "task_id")
+    task_tags = group_by(await database.fetch_all(
+        "SELECT tt.task_id, t.tag_name FROM task_tag tt JOIN tag t ON t.tag_id = tt.tag_id"
+    ), "task_id")
+    comments = group_by(await database.fetch_all(
+        "SELECT comment_id, task_id, author_id, text, created_at FROM task_comments ORDER BY created_at"
+    ), "task_id")
+    members = group_by(await database.fetch_all(
+        "SELECT project_id, user_id, user_role FROM project_user_role"
+    ), "project_id")
+    invitations = [serialize_invitation(inv) for inv in await database.fetch_all(
+        """SELECT i.*, p.project_name FROM invitations i
+           LEFT JOIN project p ON p.project_id = i.project_id
+           ORDER BY i.created_at"""
+    )]
+    invitations_by_project = group_by(invitations, "projectId")
 
-    # Проекты
-    projects_raw = await database.fetch_all("SELECT * FROM project")
+    tasks_by_project: dict = {}
+    task_ids_by_column: dict = {}
+    for t in tasks:
+        tid = t["task_id"]
+        task_performers = performers.get(tid)
+        tasks_by_project.setdefault(t["project_id"], {})[tid] = {
+            "id": tid,
+            "title": t["task_title"],
+            "description": t["description"] or "",
+            "columnId": t["column_id"],
+            "assignedTo": task_performers[0]["performer_id"] if task_performers else t["creator_id"],
+            "priority": t["priority"] or "Средний",
+            "completed": bool(t["completed"]),
+            "task_color": t["task_color"],
+            "estimate": t["estimate"],
+            "sprint": t["sprint"],
+            "createdAt": to_iso(t["created_at"]),
+            "deadline": to_date(t["deadline"]),
+            "tags": [tg["tag_name"] for tg in task_tags.get(tid, [])],
+            "comments": [
+                {"id": c["comment_id"], "authorId": c["author_id"], "text": c["text"],
+                 "isComment": True, "createdAt": to_iso(c["created_at"])}
+                for c in comments.get(tid, [])
+            ],
+        }
+        if t["column_id"]:
+            task_ids_by_column.setdefault(t["column_id"], []).append(tid)
+
     projects_list = []
-    for proj in projects_raw:
-        proj_dict = dict(proj)
-        pid = proj_dict["project_id"]
-
-        # Колонки
-        columns_raw = await database.fetch_all(
-            "SELECT column_id, column_name, position FROM project_column WHERE project_id = :pid ORDER BY position",
-            {"pid": pid}
-        )
-        columns = []
-        for col in columns_raw:
-            col_dict = dict(col)
-            cid = col_dict.pop("column_id")
-            col_dict["id"] = cid
-            col_dict["name"] = col_dict.pop("column_name")
-
-            # Таски в колонке
-            col_tasks = await database.fetch_all(
-                "SELECT task_id FROM task WHERE column_id = :cid ORDER BY created_at",
-                {"cid": cid}
-            )
-            col_dict["taskIds"] = [t["task_id"] for t in col_tasks]
-            columns.append(col_dict)
-
-        # Задачи
-        tasks_raw = await database.fetch_all(
-            "SELECT * FROM task WHERE project_id = :pid", {"pid": pid}
-        )
-        tasks_dict = {}
-        for t in tasks_raw:
-            t_dict = dict(t)
-            tid = t_dict.pop("task_id")
-            task_item = {
-                "id": tid,
-                "title": t_dict.pop("task_title"),
-                "description": t_dict.pop("description", ""),
-                "columnId": t_dict.pop("column_id"),
-                "assignedTo": t_dict.pop("creator_id"),
-                "priority": t_dict.pop("priority", "Средний"),
-                "completed": t_dict.pop("completed", False),
-                "task_color": t_dict.pop("task_color"),
-                "estimate": t_dict.pop("estimate"),
-                "sprint": t_dict.pop("sprint")
-            }
-
-            t_created_at = t_dict.pop("created_at", None)
-            if isinstance(t_created_at, datetime):
-                task_item["createdAt"] = t_created_at.isoformat()
-            elif t_created_at:
-                task_item["createdAt"] = str(t_created_at)
-            else:
-                task_item["createdAt"] = ""
-
-            deadline = t_dict.pop("deadline", None)
-            if isinstance(deadline, datetime):
-                task_item["deadline"] = deadline.isoformat()
-            elif deadline:
-                task_item["deadline"] = str(deadline)
-            else:
-                task_item["deadline"] = ""
-
-            # Исполнители (для совместимости)
-            performers = await database.fetch_all(
-                "SELECT performer_id FROM task_performer WHERE task_id = :tid",
-                {"tid": tid}
-            )
-            if performers:
-                task_item["assignedTo"] = performers[0]["performer_id"]
-
-            # Теги задачи
-            tags_raw = await database.fetch_all(
-                """SELECT t.tag_name FROM tag t
-                   JOIN task_tag tt ON t.tag_id = tt.tag_id
-                   WHERE tt.task_id = :tid""",
-                {"tid": tid}
-            )
-            task_item["tags"] = [tg["tag_name"] for tg in tags_raw]
-
-            # Комментарии
-            comments_raw = await database.fetch_all(
-                "SELECT comment_id, author_id, text, created_at FROM task_comments WHERE task_id = :tid ORDER BY created_at DESC",
-                {"tid": tid}
-            )
-            comments = []
-            for c in comments_raw:
-                c_dict = dict(c)
-                comment_item = {
-                    "id": c_dict.pop("comment_id"),
-                    "authorId": c_dict.pop("author_id"),
-                    "text": c_dict.pop("text"),
-                    "isComment": True
-                }
-                c_created_at = c_dict.pop("created_at", None)
-                if isinstance(c_created_at, datetime):
-                    comment_item["createdAt"] = c_created_at.isoformat()
-                elif c_created_at:
-                    comment_item["createdAt"] = str(c_created_at)
-                else:
-                    comment_item["createdAt"] = ""
-                comments.append(comment_item)
-            task_item["comments"] = comments
-            tasks_dict[tid] = task_item
-
-        # Участники проекта
-        members = await database.fetch_all(
-            "SELECT user_id, user_role FROM project_user_role WHERE project_id = :pid",
-            {"pid": pid}
-        )
-        members_list = [{"id": m["user_id"], "role": m["user_role"]} for m in members]
-
-        # Приглашения, связанные с проектом
-        invitations = await database.fetch_all(
-            "SELECT invite_id, invited_by, invited_user, status, role, created_at FROM invitations WHERE project_id = :pid",
-            {"pid": pid}
-        )
-        inv_list = []
-        for inv in invitations:
-            inv_dict = dict(inv)
-            inv_dict["id"] = inv_dict.pop("invite_id")
-            inv_dict["projectId"] = pid
-            inv_dict["projectName"] = proj_dict.get("project_name", "")
-            inv_dict["invitedBy"] = inv_dict.pop("invited_by")
-            inv_dict["invitedUser"] = inv_dict.pop("invited_user")
-
-            i_created_at = inv_dict.pop("created_at", None)
-            if isinstance(i_created_at, datetime):
-                inv_dict["created_at"] = i_created_at.isoformat()
-            elif i_created_at:
-                inv_dict["created_at"] = str(i_created_at)
-            else:
-                inv_dict["created_at"] = ""
-            inv_list.append(inv_dict)
-
-        proj_dict["id"] = proj_dict.pop("project_id")
-        proj_dict["name"] = proj_dict.pop("project_name")
-        proj_dict["columns"] = columns
-        proj_dict["tasks"] = tasks_dict
-        proj_dict["members"] = members_list
-        proj_dict["invitations"] = inv_list
-        proj_dict["tags"] = proj_dict.get("tags", [])
-        projects_list.append(proj_dict)
-
-    # Чаты
-    chats_raw = await database.fetch_all("SELECT * FROM chat")
-    chats_list = []
-    for chat in chats_raw:
-        chat_dict = dict(chat)
-        cid = chat_dict.pop("chat_id")
-        chat_dict["id"] = cid
-        if chat_dict.get("task_id"):
-            chat_dict["type"] = "task"
-            chat_dict["taskId"] = chat_dict.pop("task_id")
-            chat_dict.pop("project_id", None)
-
-            task_info = await database.fetch_one(
-                "SELECT task_title, project_id FROM task WHERE task_id = :tid",
-                {"tid": chat_dict["taskId"]}
-            )
-            if task_info:
-                chat_dict["taskName"] = task_info["task_title"]
-                chat_dict["projectId"] = task_info["project_id"]
-        elif chat_dict.get("project_id"):
-            chat_dict["type"] = "project"
-            chat_dict["projectId"] = chat_dict.pop("project_id")
-            chat_dict.pop("task_id", None)
-
-            proj_info = await database.fetch_one(
-                "SELECT project_name FROM project WHERE project_id = :pid",
-                {"pid": chat_dict["projectId"]}
-            )
-            if proj_info:
-                chat_dict["projectName"] = proj_info["project_name"]
-        else:
-            chat_dict.pop("task_id", None)
-            chat_dict.pop("project_id", None)
-            members_count = await database.fetch_val(
-                "SELECT COUNT(*) FROM chat_member WHERE chat_id = :cid", {"cid": cid}
-            )
-            chat_dict["type"] = "personal" if members_count == 2 else "group"
-
-        # Участники чата
-        members = await database.fetch_all(
-            "SELECT user_id FROM chat_member WHERE chat_id = :cid", {"cid": cid}
-        )
-        chat_dict["members"] = [m["user_id"] for m in members]
-
-        # Сообщения
-        messages_raw = await database.fetch_all(
-            "SELECT message_id, sender_id, content, created_at FROM message WHERE chat_id = :cid ORDER BY created_at",
-            {"cid": cid}
-        )
-        messages = []
-        for msg in messages_raw:
-            msg_dict = dict(msg)
-            msg_dict["id"] = msg_dict.pop("message_id")
-            msg_dict["authorId"] = msg_dict.pop("sender_id") or "System"
-            msg_dict["text"] = msg_dict.pop("content")
-
-            m_created_at = msg_dict.pop("created_at", None)
-            if isinstance(m_created_at, datetime):
-                msg_dict["createdAt"] = m_created_at.isoformat()
-            elif m_created_at:
-                msg_dict["createdAt"] = str(m_created_at)
-            else:
-                msg_dict["createdAt"] = ""
-
-            msg_dict["status"] = "delivered"
-            msg_dict["isComment"] = False
-            messages.append(msg_dict)
-        chat_dict["messages"] = messages
-        chats_list.append(chat_dict)
+    for p in projects:
+        pid = p["project_id"]
+        projects_list.append({
+            "id": pid,
+            "name": p["project_name"],
+            "description": p["description"] or "",
+            "owner_id": p["owner_id"],
+            "tags": p["tags"] or [],
+            "created_at": to_iso(p["created_at"]),
+            "updated_at": to_iso(p["updated_at"]),
+            "columns": [
+                {"id": c["column_id"], "name": c["column_name"], "position": c["position"],
+                 "taskIds": task_ids_by_column.get(c["column_id"], [])}
+                for c in columns.get(pid, [])
+            ],
+            "tasks": tasks_by_project.get(pid, {}),
+            "members": [{"id": m["user_id"], "role": m["user_role"]} for m in members.get(pid, [])],
+            "invitations": invitations_by_project.get(pid, []),
+        })
 
     return {
-        "users": users_list,
+        "users": [
+            {"id": u["user_id"], "name": u["user_name"], "email": u["user_email"], "avatar": u["avatar"]}
+            for u in users
+        ],
         "projects": projects_list,
-        "invitations": await get_all_invitations(),
-        "chats": chats_list
+        "invitations": invitations,
+        "chats": await build_chats(),
     }
 
-async def get_all_invitations():
-    invs = await database.fetch_all("SELECT * FROM invitations")
-    result = []
-    for inv in invs:
-        inv_dict = dict(inv)
-        inv_dict["id"] = inv_dict.pop("invite_id")
-        inv_dict["projectId"] = inv_dict.pop("project_id")
-        proj = await database.fetch_one("SELECT project_name FROM project WHERE project_id = :pid", {"pid": inv_dict["projectId"]})
-        inv_dict["projectName"] = proj["project_name"] if proj else "Неизвестный проект"
-        inv_dict["invitedBy"] = inv_dict.pop("invited_by")
-        inv_dict["invitedUser"] = inv_dict.pop("invited_user")
-        inv_dict["role"] = inv_dict.get("role", "member")
 
-        created_at = inv_dict.pop("created_at", None)
-        if isinstance(created_at, datetime):
-            inv_dict["created_at"] = created_at.isoformat()
-        elif created_at:
-            inv_dict["created_at"] = str(created_at)
+def serialize_invitation(inv) -> dict:
+    return {
+        "id": inv["invite_id"],
+        "projectId": inv["project_id"],
+        "projectName": inv["project_name"] or "Неизвестный проект",
+        "invitedBy": inv["invited_by"],
+        "invitedUser": inv["invited_user"],
+        "status": inv["status"],
+        "role": inv["role"] or "member",
+        "created_at": to_iso(inv["created_at"]),
+    }
+
+
+async def build_chats() -> list:
+    chats = await database.fetch_all(
+        """SELECT c.chat_id, c.chat_name, c.project_id, c.task_id,
+                  t.task_title, t.project_id AS task_project_id, p.project_name
+           FROM chat c
+           LEFT JOIN task t ON t.task_id = c.task_id
+           LEFT JOIN project p ON p.project_id = c.project_id"""
+    )
+    chat_members = group_by(await database.fetch_all("SELECT chat_id, user_id FROM chat_member"), "chat_id")
+    messages = group_by(await database.fetch_all(
+        "SELECT message_id, chat_id, sender_id, content, created_at FROM message ORDER BY created_at"
+    ), "chat_id")
+
+    result = []
+    for c in chats:
+        cid = c["chat_id"]
+        member_ids = [m["user_id"] for m in chat_members.get(cid, [])]
+        chat = {"id": cid, "name": c["chat_name"], "chat_name": c["chat_name"], "members": member_ids}
+        if c["task_id"]:
+            chat.update(type="task", taskId=c["task_id"],
+                        taskName=c["task_title"], projectId=c["task_project_id"])
+        elif c["project_id"]:
+            chat.update(type="project", projectId=c["project_id"], projectName=c["project_name"])
         else:
-            inv_dict["created_at"] = ""
-        result.append(inv_dict)
+            chat["type"] = "personal" if len(member_ids) == 2 else "group"
+        chat["messages"] = [
+            {"id": m["message_id"], "authorId": m["sender_id"] or "System", "text": m["content"],
+             "createdAt": to_iso(m["created_at"]), "status": "delivered", "isComment": False}
+            for m in messages.get(cid, [])
+        ]
+        result.append(chat)
     return result
 
-async def save_full_state(data: dict):
-    async with database.transaction():
-        # 1. Пользователи
-        if "users" in data:
-            for u in data["users"]:
-                uid = u.get("id")
-                if uid and uid.strip():
-                    # 🔐 НЕ перезаписываем password_hash из фронтенда — обновляем только имя/email/аватар
-                    await database.execute(
-                        """INSERT INTO user_ (user_id, user_name, user_email, password_hash, avatar)
-                           VALUES (:uid, :name, :email, :pwd, :avatar)
-                           ON CONFLICT (user_id) DO UPDATE SET
-                               user_name = EXCLUDED.user_name,
-                               user_email = EXCLUDED.user_email,
-                               avatar = EXCLUDED.avatar""",
-                        {"uid": uid, "name": u.get("name", ""), "email": u.get("email", ""),
-                         "pwd": hash_password("temp_password"), "avatar": u.get("avatar")}
-                    )
 
-        # 2. Приглашения
+# =============================================================================
+# Запись состояния
+# =============================================================================
+async def save_full_state(data: dict):
+    users = UserCache()
+    async with database.transaction():
+        await users.load()
+
+        # 1. Пользователи: только создаём отсутствующих. Имя, email и аватар
+        #    меняются через auth-service (/api/user/profile) с проверкой токена.
+        for u in data.get("users") or []:
+            await users.ensure(u.get("id"))
+
+        # 2. Проекты — до приглашений, т.к. приглашения ссылаются на проект
+        if "projects" in data:
+            await save_projects(data["projects"] or [], users)
+
+        # 3. Приглашения
         if "invitations" in data:
             await database.execute("DELETE FROM invitations")
-            for inv in data["invitations"]:
-                by_user = await ensure_user_exists(inv.get("invitedBy"))
-                to_user = await ensure_user_exists(inv.get("invitedUser"))
-                if not by_user or not to_user:
+            existing_projects = {r["project_id"] for r in await database.fetch_all("SELECT project_id FROM project")}
+            rows = []
+            for inv in data["invitations"] or []:
+                by_user = await users.ensure(inv.get("invitedBy"))
+                to_user = await users.ensure(inv.get("invitedUser"))
+                if not by_user or not to_user or inv.get("projectId") not in existing_projects:
                     continue
-                await database.execute(
+                rows.append({"iid": inv["id"], "pid": inv["projectId"], "by": by_user, "to": to_user,
+                             "status": inv.get("status", "pending"), "role": inv.get("role", "member"),
+                             "cat": parse_datetime(inv.get("created_at")) or datetime.now(timezone.utc)})
+            if rows:
+                await database.execute_many(
                     """INSERT INTO invitations (invite_id, project_id, invited_by, invited_user, status, role, created_at)
                        VALUES (:iid, :pid, :by, :to, :status, :role, :cat)
-                       ON CONFLICT (invite_id) DO NOTHING""",
-                    {"iid": inv["id"], "pid": inv["projectId"], "by": by_user,
-                     "to": to_user, "status": inv.get("status", "pending"),
-                     "role": inv.get("role", "member"), "cat": parse_datetime(inv.get("created_at"))}
-                )
-
-        # 3. Проекты
-        if "projects" in data:
-            await database.execute("DELETE FROM task_comments WHERE task_id IN (SELECT task_id FROM task WHERE project_id IN (SELECT project_id FROM project))")
-            await database.execute("DELETE FROM task_tag WHERE task_id IN (SELECT task_id FROM task WHERE project_id IN (SELECT project_id FROM project))")
-            await database.execute("DELETE FROM task_performer WHERE task_id IN (SELECT task_id FROM task WHERE project_id IN (SELECT project_id FROM project))")
-            await database.execute("DELETE FROM task WHERE project_id IN (SELECT project_id FROM project)")
-            await database.execute("DELETE FROM project_column WHERE project_id IN (SELECT project_id FROM project)")
-            await database.execute("DELETE FROM project_user_role WHERE project_id IN (SELECT project_id FROM project)")
-            await database.execute("DELETE FROM invitations WHERE project_id IN (SELECT project_id FROM project)")
-            await database.execute("DELETE FROM project")
-
-            for proj in data["projects"]:
-                pid = proj["id"]
-                owner_id = proj.get("members", [{}])[0].get("id") if proj.get("members") else None
-                owner_id = await ensure_user_exists(owner_id)
-
-                await database.execute(
-                    """INSERT INTO project (project_id, project_name, description, owner_id, tags, created_at, updated_at)
-                       VALUES (:pid, :name, :desc, :owner, :tags, :cat, :uat)
-                       ON CONFLICT (project_id) DO NOTHING""",
-                    {"pid": pid, "name": proj["name"], "desc": proj.get("description", ""),
-                     "owner": owner_id,
-                     "tags": proj.get("tags", []),
-                     "cat": parse_datetime(proj.get("created_at")), "uat": parse_datetime(proj.get("updated_at"))}
-                )
-
-                # Колонки
-                for col in proj.get("columns", []):
-                    await database.execute(
-                        """INSERT INTO project_column (column_id, project_id, column_name, position)
-                           VALUES (:cid, :pid, :cname, :pos)
-                           ON CONFLICT (column_id) DO NOTHING""",
-                        {"cid": col["id"], "pid": pid, "cname": col["name"], "pos": col.get("position", 0)}
-                    )
-
-                # Задачи
-                tasks = proj.get("tasks", {})
-                for tid, task in tasks.items():
-                    assigned_to = task.get("assignedTo")
-                    assigned_to = await ensure_user_exists(assigned_to)
-
-                    column_id = _find_column_for_task(proj["columns"], tid) or task.get("columnId")
-
-                    await database.execute(
-                        """INSERT INTO task (task_id, task_title, description, project_id, column_id,
-                           creator_id, created_at, deadline, estimate, sprint, priority, completed, task_color)
-                           VALUES (:tid, :title, :desc, :pid, :cid, :creator, :cat, :deadline, :est,
-                                   :sprint, :prio, :completed, :color)
-                           ON CONFLICT (task_id) DO NOTHING""",
-                        {"tid": tid, "title": task.get("title", ""), "desc": task.get("description", ""),
-                         "pid": pid,
-                         "cid": column_id,
-                         "creator": assigned_to,
-                         "cat": parse_datetime(task.get("createdAt")),
-                         "deadline": parse_datetime(task.get("deadline")), "est": task.get("estimate"),
-                         "sprint": task.get("sprint"), "prio": task.get("priority", "Средний"),
-                         "completed": task.get("completed", False), "color": task.get("task_color")}
-                    )
-
-                    if assigned_to:
-                        await database.execute(
-                            "INSERT INTO task_performer (task_id, performer_id) VALUES (:tid, :pid) ON CONFLICT DO NOTHING",
-                            {"tid": tid, "pid": assigned_to}
-                        )
-
-                    for tag_name in task.get("tags", []):
-                        tag = await database.fetch_one("SELECT tag_id FROM tag WHERE tag_name = :tname", {"tname": tag_name})
-                        if not tag:
-                            tag_id = await database.fetch_val(
-                                "INSERT INTO tag (tag_name) VALUES (:tname) RETURNING tag_id", {"tname": tag_name}
-                            )
-                        else:
-                            tag_id = tag["tag_id"]
-
-                        await ensure_tag_state_exists(tag_id, "default")
-                        await database.execute(
-                            """INSERT INTO task_tag (task_id, tag_id, tag_state)
-                               VALUES (:tid, :tag, :state)
-                               ON CONFLICT DO NOTHING""",
-                            {"tid": tid, "tag": tag_id, "state": "default"}
-                        )
-
-                    for comment in task.get("comments", []):
-                        author_id = comment.get("authorId")
-                        author_id = await ensure_user_exists(author_id)
-                        await database.execute(
-                            """INSERT INTO task_comments (comment_id, task_id, author_id, text, created_at)
-                               VALUES (:cid, :tid, :author, :text, :cat)
-                               ON CONFLICT (comment_id) DO NOTHING""",
-                            {"cid": comment["id"], "tid": tid, "author": author_id,
-                             "text": comment["text"], "cat": parse_datetime(comment.get("createdAt"))}
-                        )
-
-                # Участники проекта
-                for member in proj.get("members", []):
-                    m_id = await ensure_user_exists(member.get("id"))
-                    if m_id:
-                        await database.execute(
-                            """INSERT INTO project_user_role (project_id, user_id, user_role)
-                               VALUES (:pid, :uid, :role)
-                               ON CONFLICT (project_id, user_id) DO UPDATE SET user_role = EXCLUDED.user_role""",
-                            {"pid": pid, "uid": m_id, "role": member.get("role", "member")}
-                        )
+                       ON CONFLICT (invite_id) DO NOTHING""", rows)
 
         # 4. Чаты
         if "chats" in data:
-            await database.execute("DELETE FROM message")
-            await database.execute("DELETE FROM chat_member")
-            await database.execute("DELETE FROM chat")
-            for chat in data["chats"]:
-                cid = chat["id"]
-                pid = chat.get("projectId")
-                tid = chat.get("taskId")
-                if pid and tid:
-                    if chat.get("type") == "task":
-                        pid = None
-                    else:
-                        tid = None
+            await save_chats(data["chats"] or [], users)
 
-                await database.execute(
-                    """INSERT INTO chat (chat_id, chat_name, project_id, task_id)
-                       VALUES (:cid, :cname, :pid, :tid)
-                       ON CONFLICT (chat_id) DO NOTHING""",
-                    {"cid": cid, "cname": chat.get("name", ""),
-                     "pid": pid, "tid": tid}
-                )
-                for uid in chat.get("members", []):
-                    m_uid = await ensure_user_exists(uid)
-                    if m_uid:
-                        await database.execute(
-                            "INSERT INTO chat_member (chat_id, user_id) VALUES (:cid, :uid) ON CONFLICT DO NOTHING",
-                            {"cid": cid, "uid": m_uid}
-                        )
-                for msg in chat.get("messages", []):
-                    sender = msg.get("authorId")
-                    if not sender or sender.strip() == "":
-                        sender = "System"
-                    sender_id = await ensure_user_exists(sender)
+
+async def save_projects(projects: list, users: "UserCache"):
+    """Проекты обновляются на месте, а не пересоздаются: иначе каскадное удаление
+    стирало бы приглашения и чаты, которых нет в этом запросе."""
+    incoming_ids = [p["id"] for p in projects]
+    await database.execute(
+        "DELETE FROM project WHERE NOT (project_id = ANY(:ids))", {"ids": incoming_ids}
+    )
+
+    tag_ids = {r["tag_name"]: r["tag_id"] for r in await database.fetch_all("SELECT tag_id, tag_name FROM tag")}
+    now = datetime.now(timezone.utc)
+
+    for proj in projects:
+        pid = proj["id"]
+        project_members = proj.get("members") or []
+        owner_id = await users.ensure(project_members[0].get("id")) if project_members else None
+
+        await database.execute(
+            """INSERT INTO project (project_id, project_name, description, owner_id, tags, created_at, updated_at)
+               VALUES (:pid, :name, :desc, :owner, :tags, :cat, :uat)
+               ON CONFLICT (project_id) DO UPDATE SET
+                   project_name = EXCLUDED.project_name,
+                   description = EXCLUDED.description,
+                   owner_id = EXCLUDED.owner_id,
+                   tags = EXCLUDED.tags,
+                   updated_at = EXCLUDED.updated_at""",
+            {"pid": pid, "name": proj["name"], "desc": proj.get("description") or "",
+             "owner": owner_id, "tags": proj.get("tags") or [],
+             "cat": parse_datetime(proj.get("created_at")) or now, "uat": now}
+        )
+
+        # Колонки пересоздаём целиком (tasks.column_id на время обнулится и
+        # будет восстановлен ниже). Порядок колонок — их индекс в массиве.
+        project_columns = proj.get("columns") or []
+        await database.execute("DELETE FROM project_column WHERE project_id = :pid", {"pid": pid})
+        if project_columns:
+            await database.execute_many(
+                """INSERT INTO project_column (column_id, project_id, column_name, position)
+                   VALUES (:cid, :pid, :cname, :pos)""",
+                [{"cid": col["id"], "pid": pid, "cname": col["name"], "pos": index}
+                 for index, col in enumerate(project_columns)]
+            )
+
+        # Позиция и колонка задачи берутся из taskIds колонок
+        placement = {}
+        for col in project_columns:
+            for index, tid in enumerate(col.get("taskIds", col.get("tasks", []))):
+                placement[tid] = (col["id"], index)
+
+        tasks = proj.get("tasks") or {}
+        task_ids = list(tasks.keys())
+        await database.execute(
+            "DELETE FROM task WHERE project_id = :pid AND NOT (task_id = ANY(:ids))",
+            {"pid": pid, "ids": task_ids}
+        )
+        for table in ("task_tag", "task_performer", "task_comments"):
+            await database.execute(f"DELETE FROM {table} WHERE task_id = ANY(:ids)", {"ids": task_ids})
+
+        task_rows, performer_rows, tag_rows, comment_rows = [], [], [], []
+        for tid, task in tasks.items():
+            assigned_to = await users.ensure(task.get("assignedTo"))
+            column_id, position = placement.get(tid, (task.get("columnId"), 0))
+            task_rows.append({
+                "tid": tid, "title": task.get("title", ""), "desc": task.get("description") or "",
+                "pid": pid, "cid": column_id, "creator": assigned_to,
+                "cat": parse_datetime(task.get("createdAt")) or now,
+                "deadline": parse_datetime(task.get("deadline")),
+                "est": str(task["estimate"]) if task.get("estimate") not in (None, "") else None,
+                "sprint": task.get("sprint"), "prio": task.get("priority") or "Средний",
+                "completed": bool(task.get("completed")), "color": task.get("task_color"),
+                "pos": position,
+            })
+            if assigned_to:
+                performer_rows.append({"tid": tid, "uid": assigned_to})
+            for tag_name in dict.fromkeys(task.get("tags") or []):
+                if tag_name not in tag_ids:
+                    tag_ids[tag_name] = await database.fetch_val(
+                        """INSERT INTO tag (tag_name) VALUES (:name)
+                           ON CONFLICT (tag_name) DO UPDATE SET tag_name = EXCLUDED.tag_name
+                           RETURNING tag_id""", {"name": tag_name})
                     await database.execute(
-                        """INSERT INTO message (message_id, chat_id, sender_id, content, created_at)
-                           VALUES (:mid, :cid, :sender, :text, :cat)
-                           ON CONFLICT (message_id) DO NOTHING""",
-                        {"mid": msg["id"], "cid": cid, "sender": sender_id,
-                         "text": msg["text"], "cat": parse_datetime(msg.get("createdAt"))}
-                    )
+                        """INSERT INTO tag_state (tag_id, tag_state, tag_state_color)
+                           VALUES (:tid, 'default', '#808080') ON CONFLICT DO NOTHING""",
+                        {"tid": tag_ids[tag_name]})
+                tag_rows.append({"tid": tid, "tag": tag_ids[tag_name]})
+            for comment in task.get("comments") or []:
+                comment_rows.append({
+                    "cid": comment["id"], "tid": tid, "author": await users.ensure(comment.get("authorId")),
+                    "text": comment["text"], "cat": parse_datetime(comment.get("createdAt")) or now,
+                })
+
+        if task_rows:
+            await database.execute_many(
+                """INSERT INTO task (task_id, task_title, description, project_id, column_id, creator_id,
+                       created_at, deadline, estimate, sprint, priority, completed, task_color, position)
+                   VALUES (:tid, :title, :desc, :pid, :cid, :creator, :cat, :deadline, :est,
+                           :sprint, :prio, :completed, :color, :pos)
+                   ON CONFLICT (task_id) DO UPDATE SET
+                       task_title = EXCLUDED.task_title, description = EXCLUDED.description,
+                       column_id = EXCLUDED.column_id, creator_id = EXCLUDED.creator_id,
+                       deadline = EXCLUDED.deadline, estimate = EXCLUDED.estimate,
+                       sprint = EXCLUDED.sprint, priority = EXCLUDED.priority,
+                       completed = EXCLUDED.completed, task_color = EXCLUDED.task_color,
+                       position = EXCLUDED.position""", task_rows)
+        if performer_rows:
+            await database.execute_many(
+                "INSERT INTO task_performer (task_id, performer_id) VALUES (:tid, :uid) ON CONFLICT DO NOTHING",
+                performer_rows)
+        if tag_rows:
+            await database.execute_many(
+                """INSERT INTO task_tag (task_id, tag_id, tag_state) VALUES (:tid, :tag, 'default')
+                   ON CONFLICT DO NOTHING""", tag_rows)
+        if comment_rows:
+            await database.execute_many(
+                """INSERT INTO task_comments (comment_id, task_id, author_id, text, created_at)
+                   VALUES (:cid, :tid, :author, :text, :cat) ON CONFLICT (comment_id) DO NOTHING""",
+                comment_rows)
+
+        await database.execute("DELETE FROM project_user_role WHERE project_id = :pid", {"pid": pid})
+        member_rows = []
+        for member in project_members:
+            m_id = await users.ensure(member.get("id"))
+            if m_id:
+                member_rows.append({"pid": pid, "uid": m_id, "role": member.get("role", "member")})
+        if member_rows:
+            await database.execute_many(
+                """INSERT INTO project_user_role (project_id, user_id, user_role) VALUES (:pid, :uid, :role)
+                   ON CONFLICT (project_id, user_id) DO UPDATE SET user_role = EXCLUDED.user_role""",
+                member_rows)
+
+
+async def save_chats(chats: list, users: "UserCache"):
+    await database.execute("DELETE FROM chat")  # участники и сообщения удаляются каскадом
+    existing_projects = {r["project_id"] for r in await database.fetch_all("SELECT project_id FROM project")}
+    existing_tasks = {r["task_id"] for r in await database.fetch_all("SELECT task_id FROM task")}
+    now = datetime.now(timezone.utc)
+
+    chat_rows, member_rows, message_rows = [], [], []
+    for chat in chats:
+        cid = chat["id"]
+        pid, tid = chat.get("projectId"), chat.get("taskId")
+        if chat.get("type") == "task":
+            pid = None
+        elif tid:
+            tid = None
+        # Чат удалённой задачи/проекта не сохраняем — он бы нарушил внешний ключ
+        if (pid and pid not in existing_projects) or (tid and tid not in existing_tasks):
+            continue
+        chat_rows.append({"cid": cid, "cname": chat.get("name") or chat.get("chat_name") or "",
+                          "pid": pid, "tid": tid})
+        for uid in dict.fromkeys(chat.get("members") or []):
+            m_uid = await users.ensure(uid)
+            if m_uid:
+                member_rows.append({"cid": cid, "uid": m_uid})
+        for msg in chat.get("messages") or []:
+            sender = msg.get("authorId")
+            sender = None if not sender or sender == "System" else await users.ensure(sender)
+            message_rows.append({"mid": msg["id"], "cid": cid, "sender": sender, "text": msg["text"],
+                                 "cat": parse_datetime(msg.get("createdAt")) or now})
+
+    if chat_rows:
+        await database.execute_many(
+            """INSERT INTO chat (chat_id, chat_name, project_id, task_id) VALUES (:cid, :cname, :pid, :tid)
+               ON CONFLICT (chat_id) DO NOTHING""", chat_rows)
+    if member_rows:
+        await database.execute_many(
+            "INSERT INTO chat_member (chat_id, user_id) VALUES (:cid, :uid) ON CONFLICT DO NOTHING", member_rows)
+    if message_rows:
+        await database.execute_many(
+            """INSERT INTO message (message_id, chat_id, sender_id, content, created_at)
+               VALUES (:mid, :cid, :sender, :text, :cat) ON CONFLICT (message_id) DO NOTHING""", message_rows)
+
 
 # =============================================================================
 # API эндпоинты
 # =============================================================================
-
 @app.get("/api/all_data")
-async def get_all_data():
+async def get_all_data(_user_id: str = Depends(require_user)):
     return await build_full_state()
 
+
 @app.post("/api/sync")
-async def sync_data(data: dict = Body(...)):
+async def sync_data(data: dict = Body(...), _user_id: str = Depends(require_user)):
     try:
         await save_full_state(data)
-
-        # 📣 Отправляем событие в Kafka! Ошибка Kafka не должна ломать сохранение данных.
-        kafka = await ensure_producer()
-        if kafka:
-            try:
-                await asyncio.wait_for(
-                    kafka.send_and_wait("board-updates", {"event": "state_synced"}),
-                    timeout=KAFKA_SEND_TIMEOUT_SEC,
-                )
-                print("📣 Событие state_synced отправлено в Kafka!", flush=True)
-            except Exception as ke:
-                print(f"⚠️ Не удалось отправить событие в Kafka: {ke!r}", flush=True)
-
-        return {"status": "success", "message": "State synchronized successfully"}
     except Exception as e:
         traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Sync failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Sync failed: {e}")
+
+    # 📣 Событие в Kafka. Ошибка Kafka не должна ломать сохранение данных.
+    kafka = await ensure_producer()
+    if kafka:
+        try:
+            await asyncio.wait_for(
+                kafka.send_and_wait("board-updates", {"event": "state_synced"}),
+                timeout=KAFKA_SEND_TIMEOUT_SEC,
+            )
+        except Exception as ke:
+            print(f"⚠️ Не удалось отправить событие в Kafka: {ke!r}", flush=True)
+
+    return {"status": "success", "message": "State synchronized successfully"}

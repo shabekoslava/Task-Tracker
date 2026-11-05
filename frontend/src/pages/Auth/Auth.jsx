@@ -1,652 +1,411 @@
-// src/pages/Auth/Auth.jsx
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
+import { api, setToken, getToken, clearToken } from "../../lib/api";
+import { EMAIL_RE } from "../../lib/format";
+import { toast } from "../../lib/toast";
+import { BrandMark } from "../../components/Sidebar/Sidebar";
 import "./Auth.css";
 
+// login → register → verify;  recover → recover-code → recover-password
+const COPY = {
+  login: ["С возвращением", "Войдите, чтобы продолжить работу с командой."],
+  register: ["Создать аккаунт", "Пара полей — и можно заводить первый проект."],
+  verify: ["Подтвердите почту", null],
+  recover: ["Восстановление пароля", "Пришлём код на почту, указанную при регистрации."],
+  "recover-code": ["Введите код", null],
+  "recover-password": ["Новый пароль", "Минимум 6 символов."],
+};
+
+const PREVIEW = [
+  { name: "В работе", cards: [["Экран входа", "фронтенд", true], ["API приглашений", "бэкенд"]] },
+  { name: "На проверке", cards: [["Схема БД", "бэкенд"], ["Тёмная тема", "дизайн"]] },
+  { name: "Готово", cards: [["Канбан-доска", "фронтенд"]] },
+];
+
+function sessionFrom(data) {
+  return { id: data.user.id, name: data.user.name, email: data.user.email, avatar: data.user.avatar || null };
+}
+
 export default function Auth({ onLoginSuccess }) {
-  const [isLogin, setIsLogin] = useState(true);
+  const [step, setStep] = useState("login");
   const [error, setError] = useState("");
-  
-  // Login form fields
-  const [loginIdOrEmail, setLoginIdOrEmail] = useState("");
-  const [loginPassword, setLoginPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [form, setForm] = useState({
+    login: "",
+    password: "",
+    name: "",
+    email: "",
+    confirm: "",
+    code: "",
+  });
 
-  // Register form fields
-  const [registerName, setRegisterName] = useState("");
-  const [registerEmail, setRegisterEmail] = useState("");
-  const [registerPassword, setRegisterPassword] = useState("");
-  const [registerConfirmPassword, setRegisterConfirmPassword] = useState("");
+  const set = (field) => (e) =>
+    setForm((prev) => ({
+      ...prev,
+      [field]: field === "code" ? e.target.value.replace(/\D/g, "").slice(0, 6) : e.target.value,
+    }));
 
-  // 📧 Email verification flow states
-  const [isVerifying, setIsVerifying] = useState(false);
-  const [generatedOtp, setGeneratedOtp] = useState("");
-  const [userOtpInput, setUserOtpInput] = useState("");
-  const [tempUserData, setTempUserData] = useState(null);
-  const [isResending, setIsResending] = useState(false);
+  const go = (next) => {
+    setError("");
+    setStep(next);
+  };
 
-  // 🔑 Password Recovery states
-  const [isRecovering, setIsRecovering] = useState(false);
-  const [recoveryStep, setRecoveryStep] = useState(1); // 1: Email, 2: OTP, 3: New Password
-  const [recoveryEmail, setRecoveryEmail] = useState("");
-  const [newPassword, setNewPassword] = useState("");
-  const [confirmNewPassword, setConfirmNewPassword] = useState("");
-
-  // 🔄 При монтировании проверяем сохранённый JWT токен
+  // Восстанавливаем сессию по сохранённому токену
   useEffect(() => {
-    const token = localStorage.getItem("auth_token");
-    if (token) {
-      // Проверяем токен на бэкенде
-      fetch("/api/auth/me", {
-        headers: { "Authorization": `Bearer ${token}` }
+    if (!getToken()) return;
+    api("/api/auth/me")
+      .then(async (data) => {
+        const profile = await api("/api/user/profile").catch(() => null);
+        onLoginSuccess({ ...sessionFrom(data), avatar: profile?.avatar || null });
       })
-        .then((res) => {
-          if (res.ok) return res.json();
-          throw new Error("Invalid token");
-        })
-        .then((data) => {
-          if (data.user) {
-            const sessionData = {
-              id: data.user.id,
-              name: data.user.name,
-              email: data.user.email
-            };
-            localStorage.setItem("active_user_session", JSON.stringify(sessionData));
-            onLoginSuccess(sessionData);
-          }
-        })
-        .catch(() => {
-          // Токен невалидный или истёкший — удаляем
-          localStorage.removeItem("auth_token");
-        });
-    }
+      .catch(() => clearToken());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ==========================================================================
-  // 🔑 Логин через JWT (POST /api/auth/login)
-  // ==========================================================================
-  const handleLoginSubmit = async (e) => {
-    e.preventDefault();
+  const run = async (action) => {
     setError("");
-
-    const trimmedInput = loginIdOrEmail.trim();
-    const password = loginPassword;
-
-    if (!trimmedInput || !password) {
-      setError("Пожалуйста, заполните все поля");
-      return;
-    }
-
+    setBusy(true);
     try {
-      // 🔐 Отправляем логин/пароль на бэкенд — пароль проверяется через bcrypt на сервере
-      const res = await fetch("/api/auth/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ login: trimmedInput, password: password })
-      });
-
-      if (!res.ok) {
-        const errData = await res.json().catch(() => ({}));
-        setError(errData.detail || "Неверный логин или пароль");
-        return;
-      }
-
-      const data = await res.json();
-
-      // 🎫 Сохраняем зашифрованный JWT токен от бэкенда
-      if (data.access_token) {
-        localStorage.setItem("auth_token", data.access_token);
-      }
-
-      const sessionData = {
-        id: data.user.id,
-        name: data.user.name,
-        email: data.user.email
-      };
-      localStorage.setItem("active_user_session", JSON.stringify(sessionData));
-
-      // Подтягиваем данные проектов после успешного логина
-      try {
-        const allDataRes = await fetch("/api/all_data", {
-          headers: data.access_token 
-            ? { "Authorization": `Bearer ${data.access_token}` } 
-            : {}
-        });
-        if (allDataRes.ok) {
-          const allData = await allDataRes.json();
-          if (allData.projects) {
-            localStorage.setItem("project_tracker_projects", JSON.stringify(allData.projects));
-          }
-          if (allData.chats) {
-            localStorage.setItem("project_tracker_chats", JSON.stringify(allData.chats));
-          }
-          if (allData.invitations) {
-            localStorage.setItem("project_invitations", JSON.stringify(allData.invitations));
-          }
-        }
-      } catch (err) {
-        console.log("Не удалось подтянуть данные после логина:", err.message);
-      }
-
-      onLoginSuccess(sessionData);
-
+      await action();
     } catch (err) {
-      console.error("Login error:", err);
-      setError("Ошибка соединения с сервером. Проверьте, запущен ли бэкенд.");
+      setError(err.message);
+    } finally {
+      setBusy(false);
     }
   };
 
-  // ==========================================================================
-  // 📝 Регистрация через JWT (POST /api/auth/register)
-  // ==========================================================================
-  const handleRegisterSubmit = (e) => {
-    e.preventDefault();
-    setError("");
-
-    const name = registerName.trim();
-    const email = registerEmail.trim();
-    const password = registerPassword;
-    const confirm = registerConfirmPassword;
-
-    if (!name || !email || !password || !confirm) {
-      setError("Пожалуйста, заполните все поля");
-      return;
-    }
-
-    // 💡 Strict email syntax check using regex to prevent fake/malformed emails
-    const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
-    if (!emailRegex.test(email)) {
-      setError("Пожалуйста, введите корректный адрес электронной почты");
-      return;
-    }
-
-    if (password !== confirm) {
-      setError("Пароли не совпадают");
-      return;
-    }
-
-    // Generate a random 6-digit confirmation code
-    const code = String(Math.floor(100000 + Math.random() * 900000));
-    setGeneratedOtp(code);
-    setTempUserData({ name, email, password });
-
-    // Mock API call to display code in FastAPI terminal console
-    fetch("/api/auth/send-code", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email, code, name }),
-    })
-      .then((res) => {
-        if (!res.ok) throw new Error("Бэкенд офлайн");
-        return res.json();
-      })
-      .then(() => {
-        setIsVerifying(true);
-        setUserOtpInput("");
-        alert(`На вашу почту ${email} был отправлен код подтверждения! Проверьте консоль бэкенда.`);
-      })
-      .catch((err) => {
-        console.error(err);
-        // Fallback for offline mode so developers/students can still test without a running server
-        setIsVerifying(true);
-        setUserOtpInput("");
-        alert(`[Offline Mode] Код подтверждения сгенерирован: ${code} (Бэкенд недоступен, введите его для проверки)`);
-      });
+  const finishAuth = async (data) => {
+    setToken(data.access_token);
+    const profile = await api("/api/user/profile").catch(() => null);
+    onLoginSuccess({ ...sessionFrom(data), avatar: profile?.avatar || null });
   };
 
-  // ==========================================================================
-  // ✅ Подтверждение OTP → Регистрация на бэкенде с хешированием пароля
-  // ==========================================================================
-  const handleVerifyOtpSubmit = async (e) => {
+  const submitLogin = (e) => {
     e.preventDefault();
-    setError("");
-
-    if (userOtpInput !== generatedOtp) {
-      setError("Неверный код подтверждения. Пожалуйста, проверьте код из консоли бэкенда.");
-      return;
-    }
-
-    const name = tempUserData.name;
-    const email = tempUserData.email;
-    const password = tempUserData.password;
-
-    try {
-      // 🔐 Отправляем данные на бэкенд — пароль хешируется bcrypt НА СЕРВЕРЕ
-      const res = await fetch("/api/auth/register", {
+    run(async () => {
+      const data = await api("/api/auth/login", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, email, password })
+        body: { login: form.login.trim(), password: form.password },
       });
-
-      if (!res.ok) {
-        const errData = await res.json().catch(() => ({}));
-        setError(errData.detail || "Ошибка при регистрации");
-        setIsVerifying(false);
-        return;
-      }
-
-      const data = await res.json();
-
-      // 🎫 Сохраняем зашифрованный JWT токен от бэкенда
-      if (data.access_token) {
-        localStorage.setItem("auth_token", data.access_token);
-      }
-
-      const sessionData = {
-        id: data.user.id,
-        name: data.user.name,
-        email: data.user.email
-      };
-      localStorage.setItem("active_user_session", JSON.stringify(sessionData));
-
-      alert(`Регистрация успешна! Ваш уникальный ID: ${data.user.id}`);
-      onLoginSuccess(sessionData);
-
-    } catch (err) {
-      console.error("Register error:", err);
-      setError("Ошибка соединения с сервером.");
-    }
-
-    // Reset states
-    setIsVerifying(false);
-    setGeneratedOtp("");
-    setUserOtpInput("");
-    setTempUserData(null);
+      await finishAuth(data);
+    });
   };
 
-  const handleResendOtp = () => {
-    if (!tempUserData) return;
-    setIsResending(true);
-    setError("");
-    const newCode = String(Math.floor(100000 + Math.random() * 900000));
-    setGeneratedOtp(newCode);
-
-    fetch("/api/auth/send-code", {
+  const requestRegisterCode = () =>
+    api("/api/auth/send-code", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        email: tempUserData.email,
-        code: newCode,
-        name: tempUserData.name
-      }),
-    })
-      .then((res) => {
-        if (!res.ok) throw new Error("Ошибка бэкенда при отправке");
-        return res.json();
-      })
-      .then(() => {
-        setIsResending(false);
-        alert("Код подтверждения был повторно отправлен! Проверьте консоль сервера.");
-      })
-      .catch((err) => {
-        console.error(err);
-        setIsResending(false);
-        setError("Не удалось отправить код повторно. Бэкенд офлайн?");
-      });
+      body: { email: form.email.trim(), purpose: "register" },
+    });
+
+  const submitRegister = (e) => {
+    e.preventDefault();
+    if (!EMAIL_RE.test(form.email.trim())) return setError("Похоже, в адресе почты опечатка");
+    if (form.password.length < 6) return setError("Пароль должен быть не короче 6 символов");
+    if (form.password !== form.confirm) return setError("Пароли не совпадают");
+    run(async () => {
+      await requestRegisterCode();
+      setForm((prev) => ({ ...prev, code: "" }));
+      go("verify");
+    });
   };
 
-  // --- Password Recovery Handlers ---
-  const handleRecoveryRequest = (e) => {
+  const submitVerify = (e) => {
     e.preventDefault();
-    setError("");
-    const email = recoveryEmail.trim();
-    if (!email) {
-      setError("Введите вашу электронную почту");
-      return;
-    }
-
-    // Отправляем код восстановления на бэкенд
-    const code = String(Math.floor(100000 + Math.random() * 900000));
-    setGeneratedOtp(code);
-    setTempUserData({ email });
-
-    fetch("/api/auth/send-code", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email, code, name: "Восстановление" }),
-    })
-      .then(() => {
-        setRecoveryStep(2);
-        setUserOtpInput("");
-        alert(`На вашу почту ${email} отправлен код для восстановления пароля.`);
-      })
-      .catch(() => {
-        setRecoveryStep(2);
-        setUserOtpInput("");
-        alert(`[Offline Mode] Код для восстановления: ${code}`);
-      });
-  };
-
-  const handleVerifyRecoveryOtp = (e) => {
-    e.preventDefault();
-    setError("");
-    if (userOtpInput !== generatedOtp) {
-      setError("Неверный код подтверждения.");
-      return;
-    }
-    setRecoveryStep(3);
-  };
-
-  const handleResetPassword = async (e) => {
-    e.preventDefault();
-    setError("");
-    if (newPassword !== confirmNewPassword) {
-      setError("Пароли не совпадают");
-      return;
-    }
-    if (newPassword.length < 3) {
-      setError("Пароль слишком короткий");
-      return;
-    }
-
-    try {
-      // 🔐 Отправляем новый пароль на бэкенд — хешируется bcrypt на сервере
-      const res = await fetch("/api/auth/change-password", {
+    run(async () => {
+      const data = await api("/api/auth/register", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          email: tempUserData?.email || recoveryEmail,
-          newPassword: newPassword
-        })
+        body: {
+          name: form.name.trim(),
+          email: form.email.trim(),
+          password: form.password,
+          code: form.code,
+        },
       });
-
-      if (res.ok) {
-        alert("Ваш пароль был успешно изменен! Теперь вы можете войти.");
-      } else {
-        const errData = await res.json().catch(() => ({}));
-        setError(errData.detail || "Ошибка при смене пароля");
-        return;
-      }
-    } catch (err) {
-      console.error(err);
-      alert("Пароль изменён локально, но сервер недоступен.");
-    }
-
-    setIsRecovering(false);
-    setIsLogin(true);
-    setLoginIdOrEmail(tempUserData?.email || recoveryEmail);
-    setLoginPassword("");
+      toast(`Аккаунт создан. Ваш ID: ${data.user.id}`);
+      await finishAuth(data);
+    });
   };
+
+  const submitRecover = (e) => {
+    e.preventDefault();
+    run(async () => {
+      await api("/api/auth/send-code", {
+        method: "POST",
+        body: { email: form.email.trim(), purpose: "reset" },
+      });
+      setForm((prev) => ({ ...prev, code: "" }));
+      go("recover-code");
+    });
+  };
+
+  const submitRecoverCode = (e) => {
+    e.preventDefault();
+    run(async () => {
+      await api("/api/auth/verify-code", {
+        method: "POST",
+        body: { email: form.email.trim(), purpose: "reset", code: form.code },
+      });
+      setForm((prev) => ({ ...prev, password: "", confirm: "" }));
+      go("recover-password");
+    });
+  };
+
+  const submitNewPassword = (e) => {
+    e.preventDefault();
+    if (form.password.length < 6) return setError("Пароль должен быть не короче 6 символов");
+    if (form.password !== form.confirm) return setError("Пароли не совпадают");
+    run(async () => {
+      await api("/api/auth/change-password", {
+        method: "POST",
+        body: { email: form.email.trim(), code: form.code, newPassword: form.password },
+      });
+      toast("Пароль обновлён, теперь можно войти");
+      setForm((prev) => ({ ...prev, login: prev.email, password: "", confirm: "", code: "" }));
+      go("login");
+    });
+  };
+
+  const [title, subtitle] = COPY[step];
+  const codeSubtitle = (
+    <>
+      Код отправлен на <b>{form.email.trim()}</b>. Почтового сервера в проекте нет — код
+      печатается в лог auth-service.
+    </>
+  );
+
+  const field = (id, label, props) => (
+    <div className="field">
+      <label htmlFor={id}>{label}</label>
+      <input id={id} className="input auth-input" required {...props} />
+    </div>
+  );
+
+  const codeField = field("code", "Код из письма", {
+    value: form.code,
+    onChange: set("code"),
+    inputMode: "numeric",
+    autoComplete: "one-time-code",
+    placeholder: "000000",
+    className: "input auth-input code-input",
+    autoFocus: true,
+  });
 
   return (
-    <div className="auth-background-wrapper">
-      <div className="auth-background-shapes">
-        <div className="shape shape-1"></div>
-        <div className="shape shape-2"></div>
-      </div>
-      
-      <div className="auth-card-container page-fade-in">
-        <div className="auth-card-header">
-          <div className="auth-logo">
-            <span className="auth-logo-icon">✔</span>
-            <span className="auth-logo-text">Task Tracker</span>
-          </div>
-          <h2>
-            {isRecovering
-              ? "Восстановление пароля"
-              : isVerifying 
-                ? "Подтверждение почты" 
-                : isLogin 
-                  ? "Добро пожаловать!" 
-                  : "Создать аккаунт"}
-          </h2>
-          <p className="auth-subtitle">
-            {isRecovering
-              ? recoveryStep === 1 
-                ? "Введите email для сброса пароля"
-                : recoveryStep === 2
-                  ? `Мы отправили код на ${tempUserData?.email}`
-                  : "Придумайте новый надежный пароль"
-              : isVerifying 
-                ? `Мы отправили 6-значный код подтверждения на ${tempUserData?.email}. Проверьте консоль бэкенда.`
-                : isLogin 
-                  ? "Введите свои учетные данные для доступа к доске" 
-                  : "Заполните форму, чтобы начать работу с проектами"}
-          </p>
+    <div className="auth-page">
+      <section className="auth-showcase" aria-hidden="true">
+        <div className="auth-brand">
+          <BrandMark size={34} />
+          <span>Task Tracker</span>
         </div>
 
-        {error && <div className="auth-error-box">{error}</div>}
+        <div className="showcase-copy">
+          <h1>
+            Задачи, сроки и обсуждения
+            <br />
+            <span>в одном месте.</span>
+          </h1>
+          <p>Канбан-доска, приглашения в команду и чат по каждой задаче.</p>
+        </div>
 
-        {isRecovering ? (
-          recoveryStep === 1 ? (
-            <form className="auth-form" onSubmit={handleRecoveryRequest}>
-              <div className="auth-field">
-                <label htmlFor="rec-email">Электронная почта</label>
-                <input
-                  id="rec-email"
-                  type="email"
-                  value={recoveryEmail}
-                  onChange={(e) => setRecoveryEmail(e.target.value)}
-                  placeholder="Ваш зарегистрированный email"
-                  required
-                />
+        <div className="showcase-board">
+          {PREVIEW.map((column, ci) => (
+            <div className="sb-column" key={column.name} style={{ animationDelay: `${ci * 90}ms` }}>
+              <div className="sb-column-head">
+                <span className={`sb-dot sb-dot-${ci}`} />
+                {column.name}
+                <span className="sb-count">{column.cards.length}</span>
               </div>
-              <button type="submit" className="auth-submit-btn">Отправить код</button>
-              <button 
-                type="button" 
-                className="auth-toggle-link"
-                style={{ marginTop: "12px", background: "none", border: "none", cursor: "pointer", display: "block", width: "100%", textAlign: "center" }}
-                onClick={() => { setIsRecovering(false); setError(""); }}
-              >
-                Вернуться ко входу
-              </button>
-            </form>
-          ) : recoveryStep === 2 ? (
-            <form className="auth-form" onSubmit={handleVerifyRecoveryOtp}>
-              <div className="auth-field">
-                <label htmlFor="rec-otp">Код подтверждения</label>
-                <input
-                  id="rec-otp"
-                  type="text"
-                  maxLength={6}
-                  value={userOtpInput}
-                  onChange={(e) => setUserOtpInput(e.target.value.replace(/\D/g, ""))}
-                  placeholder="000000"
-                  style={{ textAlign: "center", letterSpacing: "8px", fontSize: "20px", fontWeight: "bold" }}
-                  required
-                />
-              </div>
-              <button type="submit" className="auth-submit-btn">Подтвердить код</button>
-              <button 
-                type="button" 
-                className="auth-toggle-link"
-                style={{ marginTop: "12px", background: "none", border: "none", cursor: "pointer", display: "block", width: "100%", textAlign: "center" }}
-                onClick={() => { setRecoveryStep(1); setError(""); }}
-              >
-                Вернуться назад
-              </button>
-            </form>
-          ) : (
-            <form className="auth-form" onSubmit={handleResetPassword}>
-              <div className="auth-field">
-                <label htmlFor="rec-pass">Новый пароль</label>
-                <input
-                  id="rec-pass"
-                  type="password"
-                  value={newPassword}
-                  onChange={(e) => setNewPassword(e.target.value)}
-                  placeholder="Придумайте новый пароль"
-                  required
-                />
-              </div>
-              <div className="auth-field">
-                <label htmlFor="rec-pass-conf">Подтверждение пароля</label>
-                <input
-                  id="rec-pass-conf"
-                  type="password"
-                  value={confirmNewPassword}
-                  onChange={(e) => setConfirmNewPassword(e.target.value)}
-                  placeholder="Повторите новый пароль"
-                  required
-                />
-              </div>
-              <button type="submit" className="auth-submit-btn">Сохранить пароль</button>
-            </form>
-          )
-        ) : isVerifying ? (
-          <form className="auth-form" onSubmit={handleVerifyOtpSubmit}>
-            <div className="auth-field">
-              <label htmlFor="reg-otp">Код подтверждения</label>
-              <input
-                id="reg-otp"
-                type="text"
-                maxLength={6}
-                value={userOtpInput}
-                onChange={(e) => setUserOtpInput(e.target.value.replace(/\D/g, ""))}
-                placeholder="000000"
-                style={{ 
-                  textAlign: "center", 
-                  letterSpacing: "8px", 
-                  fontSize: "20px", 
-                  fontWeight: "bold" 
-                }}
-                required
-              />
+              {column.cards.map(([text, tag, urgent]) => (
+                <div className="sb-card" key={text}>
+                  <span className="sb-card-title">{text}</span>
+                  <span className="sb-card-meta">
+                    <span className="tag">{tag}</span>
+                    {urgent && <span className="badge badge-danger">Срочно</span>}
+                  </span>
+                </div>
+              ))}
             </div>
+          ))}
+        </div>
+      </section>
 
-            <button type="submit" className="auth-submit-btn">
-              Подтвердить регистрацию
-            </button>
-
-            <button 
-              type="button" 
-              className="auth-toggle-link"
-              style={{ marginTop: "12px", background: "none", border: "none", cursor: "pointer", display: "block", width: "100%", textAlign: "center" }}
-              onClick={() => {
-                setIsVerifying(false);
-                setError("");
-                setTempUserData(null);
-              }}
-            >
-              Вернуться назад
-            </button>
-
-            <button
-              type="button"
-              className="auth-toggle-link"
-              style={{ marginTop: "8px", background: "none", border: "none", cursor: "pointer", display: "block", width: "100%", textAlign: "center", opacity: isResending ? 0.6 : 1 }}
-              onClick={handleResendOtp}
-              disabled={isResending}
-            >
-              {isResending ? "Отправка..." : "Отправить код повторно"}
-            </button>
-          </form>
-        ) : isLogin ? (
-          <form className="auth-form" onSubmit={handleLoginSubmit}>
-            <div className="auth-field">
-              <label htmlFor="login-input">ID пользователя или Email</label>
-              <input
-                id="login-input"
-                type="text"
-                value={loginIdOrEmail}
-                onChange={(e) => setLoginIdOrEmail(e.target.value)}
-                placeholder="INV-1529 или ivan@example.com"
-                required
-              />
-            </div>
-            
-            <div className="auth-field">
-              <label htmlFor="login-pass">Пароль</label>
-              <input
-                id="login-pass"
-                type="password"
-                value={loginPassword}
-                onChange={(e) => setLoginPassword(e.target.value)}
-                placeholder="Введите ваш пароль"
-                required
-              />
-            </div>
-
-            <button type="submit" className="auth-submit-btn">
-              Войти в систему
-            </button>
-            <div style={{ textAlign: "center", marginTop: "15px" }}>
-              <button 
-                type="button" 
-                className="auth-toggle-link"
-                onClick={() => {
-                  setIsRecovering(true);
-                  setRecoveryStep(1);
-                  setRecoveryEmail(loginIdOrEmail.includes("@") ? loginIdOrEmail : "");
-                  setError("");
-                }}
-              >
-                Забыли пароль?
-              </button>
-            </div>
-          </form>
-        ) : (
-          <form className="auth-form" onSubmit={handleRegisterSubmit}>
-            <div className="auth-field">
-              <label htmlFor="reg-name">Ваше имя</label>
-              <input
-                id="reg-name"
-                type="text"
-                value={registerName}
-                onChange={(e) => setRegisterName(e.target.value)}
-                placeholder="Иван Иванов"
-                required
-              />
-            </div>
-
-            <div className="auth-field">
-              <label htmlFor="reg-email">Электронная почта</label>
-              <input
-                id="reg-email"
-                type="email"
-                value={registerEmail}
-                onChange={(e) => setRegisterEmail(e.target.value)}
-                placeholder="ivan@example.com"
-                required
-              />
-            </div>
-
-            <div className="auth-field">
-              <label htmlFor="reg-pass">Пароль</label>
-              <input
-                id="reg-pass"
-                type="password"
-                value={registerPassword}
-                onChange={(e) => setRegisterPassword(e.target.value)}
-                placeholder="Придумайте пароль"
-                required
-              />
-            </div>
-
-            <div className="auth-field">
-              <label htmlFor="reg-confirm">Подтверждение пароля</label>
-              <input
-                id="reg-confirm"
-                type="password"
-                value={registerConfirmPassword}
-                onChange={(e) => setRegisterConfirmPassword(e.target.value)}
-                placeholder="Повторите пароль"
-                required
-              />
-            </div>
-
-            <button type="submit" className="auth-submit-btn">
-              Зарегистрироваться
-            </button>
-          </form>
-        )}
-
-        {!isVerifying && !isRecovering && (
-          <div className="auth-footer-toggle">
-            <span>
-              {isLogin ? "Еще нет аккаунта?" : "Уже зарегистрированы?"}
-            </span>
-            <button 
-              type="button" 
-              className="auth-toggle-link"
-              onClick={() => {
-                setIsLogin(!isLogin);
-                setError("");
-              }}
-            >
-              {isLogin ? "Создать новый аккаунт" : "Войти в существующий"}
-            </button>
+      <section className="auth-panel">
+        <div className="auth-box">
+          <div className="auth-brand auth-brand-mobile">
+            <BrandMark size={30} />
+            <span>Task Tracker</span>
           </div>
-        )}
-      </div>
+
+          <h2 className="auth-title">{title}</h2>
+          <p className="auth-subtitle">
+            {step === "verify" || step === "recover-code" ? codeSubtitle : subtitle}
+          </p>
+
+          {error && <div className="notice notice-error auth-error">{error}</div>}
+
+          {step === "login" && (
+            <form className="auth-form" onSubmit={submitLogin}>
+              {field("login", "Email или ID", {
+                value: form.login,
+                onChange: set("login"),
+                placeholder: "ivan@example.com или INV-1234",
+                autoComplete: "username",
+                autoFocus: true,
+              })}
+              <div className="field">
+                <div className="field-row">
+                  <label htmlFor="password">Пароль</label>
+                  <button
+                    type="button"
+                    className="link-btn small"
+                    onClick={() => {
+                      setForm((prev) => ({ ...prev, email: prev.login.includes("@") ? prev.login : prev.email }));
+                      go("recover");
+                    }}
+                  >
+                    Забыли пароль?
+                  </button>
+                </div>
+                <input
+                  id="password"
+                  className="input auth-input"
+                  type="password"
+                  value={form.password}
+                  onChange={set("password")}
+                  autoComplete="current-password"
+                  required
+                />
+              </div>
+              <button className="btn btn-primary btn-block auth-submit" disabled={busy}>
+                {busy ? "Входим…" : "Войти"}
+              </button>
+            </form>
+          )}
+
+          {step === "register" && (
+            <form className="auth-form" onSubmit={submitRegister}>
+              {field("name", "Имя", {
+                value: form.name,
+                onChange: set("name"),
+                placeholder: "Иван Иванов",
+                autoComplete: "name",
+                autoFocus: true,
+              })}
+              {field("email", "Почта", {
+                type: "email",
+                value: form.email,
+                onChange: set("email"),
+                placeholder: "ivan@example.com",
+                autoComplete: "email",
+              })}
+              <div className="field-pair">
+                {field("new-password", "Пароль", {
+                  type: "password",
+                  value: form.password,
+                  onChange: set("password"),
+                  autoComplete: "new-password",
+                })}
+                {field("confirm", "Ещё раз", {
+                  type: "password",
+                  value: form.confirm,
+                  onChange: set("confirm"),
+                  autoComplete: "new-password",
+                })}
+              </div>
+              <button className="btn btn-primary btn-block auth-submit" disabled={busy}>
+                {busy ? "Отправляем код…" : "Продолжить"}
+              </button>
+            </form>
+          )}
+
+          {step === "verify" && (
+            <form className="auth-form" onSubmit={submitVerify}>
+              {codeField}
+              <button className="btn btn-primary btn-block auth-submit" disabled={busy || form.code.length !== 6}>
+                {busy ? "Проверяем…" : "Подтвердить и войти"}
+              </button>
+              <div className="auth-links">
+                <button type="button" className="link-btn" onClick={() => go("register")}>
+                  Изменить данные
+                </button>
+                <button
+                  type="button"
+                  className="link-btn"
+                  disabled={busy}
+                  onClick={() => run(async () => {
+                    await requestRegisterCode();
+                    toast("Новый код отправлен");
+                  })}
+                >
+                  Отправить код ещё раз
+                </button>
+              </div>
+            </form>
+          )}
+
+          {step === "recover" && (
+            <form className="auth-form" onSubmit={submitRecover}>
+              {field("recover-email", "Почта", {
+                type: "email",
+                value: form.email,
+                onChange: set("email"),
+                autoComplete: "email",
+                autoFocus: true,
+              })}
+              <button className="btn btn-primary btn-block auth-submit" disabled={busy}>
+                {busy ? "Отправляем…" : "Получить код"}
+              </button>
+            </form>
+          )}
+
+          {step === "recover-code" && (
+            <form className="auth-form" onSubmit={submitRecoverCode}>
+              {codeField}
+              <button className="btn btn-primary btn-block auth-submit" disabled={busy || form.code.length !== 6}>
+                Продолжить
+              </button>
+            </form>
+          )}
+
+          {step === "recover-password" && (
+            <form className="auth-form" onSubmit={submitNewPassword}>
+              {field("reset-password", "Новый пароль", {
+                type: "password",
+                value: form.password,
+                onChange: set("password"),
+                autoComplete: "new-password",
+                autoFocus: true,
+              })}
+              {field("reset-confirm", "Повторите пароль", {
+                type: "password",
+                value: form.confirm,
+                onChange: set("confirm"),
+                autoComplete: "new-password",
+              })}
+              <button className="btn btn-primary btn-block auth-submit" disabled={busy}>
+                Сохранить пароль
+              </button>
+            </form>
+          )}
+
+          <div className="auth-switch">
+            {step === "login" ? (
+              <>
+                Нет аккаунта?{" "}
+                <button type="button" className="link-btn" onClick={() => go("register")}>
+                  Зарегистрироваться
+                </button>
+              </>
+            ) : (
+              <>
+                {step === "register" ? "Уже есть аккаунт? " : ""}
+                <button type="button" className="link-btn" onClick={() => go("login")}>
+                  {step === "register" ? "Войти" : "Вернуться ко входу"}
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      </section>
     </div>
   );
 }

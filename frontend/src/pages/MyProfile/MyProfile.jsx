@@ -1,400 +1,221 @@
+import { useRef, useState } from "react";
+import Icon from "../../components/Icon/Icon";
+import Avatar from "../../components/Avatar/Avatar";
+import { api } from "../../lib/api";
+import { EMAIL_RE } from "../../lib/format";
+import { toast } from "../../lib/toast";
 import "./MyProfile.css";
-import { useState, useEffect } from "react";
-import Card from "../../components/Card/Card";
 
-export default function MyProfile({ userId, onLogout, onProfileUpdate }) {
-  const [displayName, setDisplayName] = useState("");
-  const [editingName, setEditingName] = useState("");
+const MAX_AVATAR_SIDE = 256;
 
-  const [email, setEmail] = useState("");
-  const [editingEmail, setEditingEmail] = useState("");
-
-  const [avatar, setAvatar] = useState(() => {
-    const session = localStorage.getItem("active_user_session");
-    if (session) {
-      const parsed = JSON.parse(session);
-      return parsed.avatar || null;
-    }
-    return null;
-  });
-
-  const [currentPassword, setCurrentPassword] = useState("");
-  const [newPassword, setNewPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
-
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState(null);
-
-  // Загружаем профиль при первом рендере
-  useEffect(() => {
-    fetch(`/api/user/profile?userId=${userId}`) // Благодаря прокси работает без localhost:8000
-      .then((res) => {
-        if (!res.ok) throw new Error("Ошибка загрузки профиля");
-        return res.json();
-      })
-      .then((data) => {
-        setDisplayName(data.displayName);
-        setEditingName(data.displayName);
-        setEmail(data.email);
-        setEditingEmail(data.email);
-        setIsLoading(false);
-      })
-      .catch((err) => {
-        console.warn("FastAPI backend не запущен, загружаем данные локальной сессии:", err.message);
-        
-        // Резервный вариант: загрузка из localStorage
-        const session = localStorage.getItem("active_user_session");
-        if (session) {
-          const parsed = JSON.parse(session);
-          setDisplayName(parsed.name || "Иван Иванов");
-          setEditingName(parsed.name || "Иван Иванов");
-          setEmail(parsed.email || "ivan@example.com");
-          setEditingEmail(parsed.email || "ivan@example.com");
-        } else {
-          setDisplayName("Иван Иванов");
-          setEditingName("Иван Иванов");
-          setEmail("ivan@example.com");
-          setEditingEmail("ivan@example.com");
-        }
-        setIsLoading(false);
-      });
-  }, [userId]);
-
-  function saveName() {
-    const trimmed = editingName.trim();
-    if (!trimmed) {
-      alert("Имя пользователя не может быть пустым");
-      return;
-    }
-
-    setDisplayName(trimmed);
-    
-    // Sync local storage session so sidebar changes instantly
-    const session = localStorage.getItem("active_user_session");
-    let updatedSession = null;
-    if (session) {
-      updatedSession = JSON.parse(session);
-      updatedSession.name = trimmed;
-      localStorage.setItem("active_user_session", JSON.stringify(updatedSession));
-    }
-
-    // Sync inside auth_users database in localStorage
-    const usersJson = localStorage.getItem("auth_users");
-    if (usersJson) {
-      const users = JSON.parse(usersJson);
-      const updatedUsers = users.map((u) => 
-        u.id === userId ? { ...u, name: trimmed } : u
-      );
-      localStorage.setItem("auth_users", JSON.stringify(updatedUsers));
-    }
-
-    if (onProfileUpdate && updatedSession) {
-      onProfileUpdate(updatedSession);
-    }
-
-    // Sync to Python FastAPI Server
-    fetch("/api/user/profile", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        userId,
-        displayName: trimmed,
-        email: editingEmail
-      })
-    })
-    .then((res) => res.json())
-    .then((data) => {
-      console.log("Profile name synchronized to FastAPI:", data);
-      alert("Имя сохранено");
-    })
-    .catch((err) => {
-      console.log("FastAPI offline, profile saved locally:", err.message);
-      alert("Имя сохранено локально");
-    });
-  }
-
-  function saveEmail() {
-    const trimmed = editingEmail.trim();
-    if (!trimmed) {
-      alert("Пожалуйста, введите адрес электронной почты");
-      return;
-    }
-
-    const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
-    if (!emailRegex.test(trimmed)) {
-      alert("Пожалуйста, введите корректный адрес электронной почты");
-      return;
-    }
-
-    // Check if email already registered by ANOTHER user
-    const usersJson = localStorage.getItem("auth_users");
-    if (usersJson) {
-      const users = JSON.parse(usersJson);
-      const isAlreadyTaken = users.some(
-        (u) => u.id !== userId && u.email.toLowerCase() === trimmed.toLowerCase()
-      );
-      if (isAlreadyTaken) {
-        alert("Этот Email уже занят другим пользователем");
-        return;
-      }
-    }
-
-    setEmail(trimmed);
-
-    // Sync local storage session so sidebar changes instantly
-    const session = localStorage.getItem("active_user_session");
-    let updatedSession = null;
-    if (session) {
-      updatedSession = JSON.parse(session);
-      updatedSession.email = trimmed;
-      localStorage.setItem("active_user_session", JSON.stringify(updatedSession));
-    }
-
-    // Sync inside auth_users database in localStorage
-    if (usersJson) {
-      const users = JSON.parse(usersJson);
-      const updatedUsers = users.map((u) => 
-        u.id === userId ? { ...u, email: trimmed } : u
-      );
-      localStorage.setItem("auth_users", JSON.stringify(updatedUsers));
-    }
-
-    if (onProfileUpdate && updatedSession) {
-      onProfileUpdate(updatedSession);
-    }
-
-    // Sync to Python FastAPI Server
-    fetch("/api/user/profile", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        userId,
-        displayName: displayName,
-        email: trimmed
-      })
-    })
-    .then((res) => res.json())
-    .then((data) => {
-      console.log("Profile email synchronized to FastAPI:", data);
-      alert("Email сохранён");
-    })
-    .catch((err) => {
-      console.log("FastAPI offline, email saved locally:", err.message);
-      alert("Email сохранён локально");
-    });
-  }
-
-  function changePassword() {
-    if (!currentPassword || !newPassword) {
-      alert("Заполните поля пароля");
-      return;
-    }
-    if (newPassword !== confirmPassword) {
-      alert("Новый пароль и подтверждение не совпадают");
-      return;
-    }
-    const usersJson = localStorage.getItem("auth_users");
-    if (usersJson) {
-      const users = JSON.parse(usersJson);
-      const user = users.find(u => u.id === userId);
-      
-      if (!user || user.password !== currentPassword) {
-        alert("Текущий пароль введен неверно");
-        return;
-      }
-      
-      const updatedUsers = users.map((u) => 
-        u.id === userId ? { ...u, password: newPassword } : u
-      );
-      localStorage.setItem("auth_users", JSON.stringify(updatedUsers));
-      
-      // Update session as well if password is stored there
-      const session = localStorage.getItem("active_user_session");
-      if (session) {
-        const parsed = JSON.parse(session);
-        parsed.password = newPassword;
-        localStorage.setItem("active_user_session", JSON.stringify(parsed));
-      }
-      
-      // Trigger sync
-      fetch("/api/sync", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ users: updatedUsers }),
-      }).catch(e => console.log(e));
-    }
-    
-    setCurrentPassword("");
-    setNewPassword("");
-    setConfirmPassword("");
-    alert("Пароль успешно изменён!");
-  }
-
-  function handleAvatarChange(event) {
-    const file = event.target.files[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        const base64Avatar = e.target.result;
-        setAvatar(base64Avatar);
-        
-        // Save to active session
-        const session = localStorage.getItem("active_user_session");
-        if (session) {
-          const parsed = JSON.parse(session);
-          parsed.avatar = base64Avatar;
-          localStorage.setItem("active_user_session", JSON.stringify(parsed));
-          if (onProfileUpdate) onProfileUpdate(parsed);
-        }
-        
-        // Save to users DB
-        const usersJson = localStorage.getItem("auth_users");
-        if (usersJson) {
-          const users = JSON.parse(usersJson);
-          const updatedUsers = users.map((u) => 
-            u.id === userId ? { ...u, avatar: base64Avatar } : u
-          );
-          localStorage.setItem("auth_users", JSON.stringify(updatedUsers));
-          
-          // Trigger sync
-          fetch("/api/sync", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ users: updatedUsers }),
-          }).catch(e => console.log(e));
-        }
+// Сжимаем фото до 256px: аватар хранится в БД строкой base64
+function resizeImage(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = reject;
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = reject;
+      img.onload = () => {
+        const scale = Math.min(1, MAX_AVATAR_SIDE / Math.max(img.width, img.height));
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.round(img.width * scale);
+        canvas.height = Math.round(img.height * scale);
+        canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL("image/jpeg", 0.85));
       };
-      reader.readAsDataURL(file);
-    }
-  }
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
 
-  function handleLogout() {
-    if (onLogout) {
-      onLogout();
-    }
-  }
+export default function MyProfile({ user, onLogout, onProfileUpdate }) {
+  const [name, setName] = useState(user.name);
+  const [email, setEmail] = useState(user.email);
+  const [passwords, setPasswords] = useState({ current: "", next: "", confirm: "" });
+  const [saving, setSaving] = useState(null);
+  const fileRef = useRef(null);
 
-  // Пока данные грузятся, показываем спиннер
-  if (isLoading) {
-    return (
-      <div className="page-fade-in profile-page" style={{ display: "flex", justifyContent: "center", alignItems: "center", height: "80vh", fontSize: "18px", color: "var(--nav-text-inactive)" }}>
-        Загрузка профиля...
-      </div>
-    );
-  }
+  const updateProfile = async (changes, key, successText) => {
+    setSaving(key);
+    try {
+      const data = await api("/api/user/profile", { method: "POST", body: changes });
+      onProfileUpdate({ ...user, ...data.user });
+      toast(successText);
+      return true;
+    } catch (err) {
+      toast(err.message, "error");
+      return false;
+    } finally {
+      setSaving(null);
+    }
+  };
+
+  const saveInfo = (e) => {
+    e.preventDefault();
+    if (!name.trim()) return toast("Имя не может быть пустым", "error");
+    if (!EMAIL_RE.test(email.trim())) return toast("Проверьте адрес почты", "error");
+    updateProfile({ displayName: name.trim(), email: email.trim() }, "info", "Профиль обновлён");
+  };
+
+  const changeAvatar = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    try {
+      const avatar = await resizeImage(file);
+      await updateProfile({ avatar }, "avatar", "Фото обновлено");
+    } catch {
+      toast("Не удалось прочитать изображение", "error");
+    }
+  };
+
+  const changePassword = async (e) => {
+    e.preventDefault();
+    if (passwords.next.length < 6) return toast("Новый пароль должен быть не короче 6 символов", "error");
+    if (passwords.next !== passwords.confirm) return toast("Пароли не совпадают", "error");
+    setSaving("password");
+    try {
+      await api("/api/auth/change-password", {
+        method: "POST",
+        body: { currentPassword: passwords.current, newPassword: passwords.next },
+      });
+      setPasswords({ current: "", next: "", confirm: "" });
+      toast("Пароль изменён");
+    } catch (err) {
+      toast(err.message, "error");
+    } finally {
+      setSaving(null);
+    }
+  };
+
+  const setPassword = (field) => (e) => setPasswords((prev) => ({ ...prev, [field]: e.target.value }));
+  const infoChanged = name.trim() !== user.name || email.trim() !== user.email;
 
   return (
-    <div className="page-fade-in profile-page">
-      <h2 className="profile-title">Мой профиль — {displayName}</h2>
-
-      <div className="profile-cards">
-        <Card title="Аватар">
-          <div className="avatar-section">
-            {avatar ? (
-              <img
-                src={avatar}
-                className="avatar-image"
-                alt="Avatar"
-                onClick={() => document.querySelector(".avatar-input").click()}
-                style={{ cursor: "pointer" }}
-              />
-            ) : (
-              <div 
-                className="avatar-image avatar-placeholder" 
-                onClick={() => document.querySelector(".avatar-input").click()}
-              >
-                <svg className="avatar-placeholder-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
-                  <circle cx="12" cy="7" r="4" />
-                </svg>
-              </div>
-            )}
-            <input
-              type="file"
-              accept="image/*"
-              onChange={handleAvatarChange}
-              className="avatar-input"
-              style={{ display: "none" }}
-            />
-            <button 
-              className="btn secondary small" 
-              onClick={() => document.querySelector(".avatar-input").click()}
+    <div className="page profile-page">
+      <section className="profile-hero panel">
+        <button
+          className="profile-avatar"
+          onClick={() => fileRef.current?.click()}
+          aria-label="Сменить фото"
+          disabled={saving === "avatar"}
+        >
+          <Avatar name={user.name} src={user.avatar} size={84} />
+          <span className="profile-avatar-overlay">
+            <Icon name="image" size={20} />
+          </span>
+        </button>
+        <input ref={fileRef} type="file" accept="image/*" hidden onChange={changeAvatar} />
+        <div className="profile-hero-text">
+          <h1>{user.name}</h1>
+          <span className="muted">{user.email}</span>
+          <span className="id-chip">{user.id}</span>
+        </div>
+        <div className="profile-hero-actions">
+          {user.avatar && (
+            <button
+              className="btn btn-ghost btn-sm"
+              onClick={() => updateProfile({ avatar: null }, "avatar", "Фото удалено")}
             >
-              Выбрать фото
+              Убрать фото
             </button>
-          </div>
-        </Card>
+          )}
+          <button className="btn btn-sm" onClick={onLogout}>
+            <Icon name="logout" size={14} /> Выйти
+          </button>
+        </div>
+      </section>
 
-        <Card title="Информация">
-          <label>ID пользователя</label>
-          <input type="text" value={userId} readOnly />
-          <label>Отображаемое имя</label>
-          <input
-            type="text"
-            value={editingName}
-            onChange={(e) => setEditingName(e.target.value)}
-          />
-          <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-            <button className="btn primary" onClick={saveName}>
-              Сохранить
-            </button>
-            <button className="btn" onClick={() => setEditingName(displayName)}>
-              Отмена
+      <div className="profile-grid">
+        <form className="panel panel-pad profile-section" onSubmit={saveInfo}>
+          <div>
+            <h3 className="panel-title">Личные данные</h3>
+            <p className="panel-sub">Имя видят коллеги в проектах и чатах.</p>
+          </div>
+          <div className="field">
+            <label htmlFor="profile-name">Имя</label>
+            <input id="profile-name" className="input" value={name} onChange={(e) => setName(e.target.value)} />
+          </div>
+          <div className="field">
+            <label htmlFor="profile-email">Почта</label>
+            <input
+              id="profile-email"
+              className="input"
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+            />
+          </div>
+          <div className="profile-actions">
+            {infoChanged && (
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={() => {
+                  setName(user.name);
+                  setEmail(user.email);
+                }}
+              >
+                Отменить
+              </button>
+            )}
+            <button className="btn btn-primary" disabled={!infoChanged || saving === "info"}>
+              {saving === "info" ? "Сохраняем…" : "Сохранить"}
             </button>
           </div>
-        </Card>
+        </form>
 
-        <Card title="Контакты">
-          <label>Email</label>
-          <input
-            type="email"
-            value={editingEmail}
-            onChange={(e) => setEditingEmail(e.target.value)}
-          />
-          <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-            <button className="btn primary" onClick={saveEmail}>
-              Сохранить
-            </button>
-            <button className="btn" onClick={() => setEditingEmail(email)}>
-              Отмена
+        <form className="panel panel-pad profile-section" onSubmit={changePassword}>
+          <div>
+            <h3 className="panel-title">Пароль</h3>
+            <p className="panel-sub">Минимум 6 символов.</p>
+          </div>
+          <div className="field">
+            <label htmlFor="pw-current">Текущий пароль</label>
+            <input
+              id="pw-current"
+              className="input"
+              type="password"
+              value={passwords.current}
+              onChange={setPassword("current")}
+              autoComplete="current-password"
+              required
+            />
+          </div>
+          <div className="field-pair">
+            <div className="field">
+              <label htmlFor="pw-next">Новый</label>
+              <input
+                id="pw-next"
+                className="input"
+                type="password"
+                value={passwords.next}
+                onChange={setPassword("next")}
+                autoComplete="new-password"
+                required
+              />
+            </div>
+            <div className="field">
+              <label htmlFor="pw-confirm">Ещё раз</label>
+              <input
+                id="pw-confirm"
+                className="input"
+                type="password"
+                value={passwords.confirm}
+                onChange={setPassword("confirm")}
+                autoComplete="new-password"
+                required
+              />
+            </div>
+          </div>
+          <div className="profile-actions">
+            <button className="btn btn-primary" disabled={saving === "password"}>
+              {saving === "password" ? "Меняем…" : "Изменить пароль"}
             </button>
           </div>
-        </Card>
-
-        <Card title="Смена пароля">
-          <label>Текущий пароль</label>
-          <input 
-            type="password" 
-            value={currentPassword} 
-            onChange={(e) => setCurrentPassword(e.target.value)} 
-          />
-          <label>Новый пароль</label>
-          <input 
-            type="password" 
-            value={newPassword} 
-            onChange={(e) => setNewPassword(e.target.value)} 
-          />
-          <label>Подтвердите новый пароль</label>
-          <input 
-            type="password" 
-            value={confirmPassword} 
-            onChange={(e) => setConfirmPassword(e.target.value)} 
-          />
-          <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-            <button className="btn primary" onClick={changePassword}>
-              Изменить пароль
-            </button>
-          </div>
-        </Card>
-
-        <Card title="Аккаунт">
-          <p>Выйти из текущей учётной записи.</p>
-          <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-            <button className="btn danger" onClick={handleLogout}>
-              Выйти
-            </button>
-          </div>
-        </Card>
+        </form>
       </div>
     </div>
   );

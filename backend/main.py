@@ -24,7 +24,7 @@ except ImportError:
 # =============================================================================
 DATABASE_URL = os.getenv(
     "DATABASE_URL",
-    "postgresql+asyncpg://postgres:Slava2005@localhost:5432/task_tracker_bd"
+    "postgresql+asyncpg://postgres:postgres@localhost:5432/task_tracker_bd"
 )
 
 JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "dev-secret-key-CHANGE-IN-PROD")

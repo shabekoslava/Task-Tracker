@@ -1,172 +1,179 @@
-/* src/components/Sidebar.css */
-
 .sidebar {
-  background-color: var(--bg-surface);
-  border-right: 1px solid var(--border-color);
-  transition: width 0.3s ease;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  flex-shrink: 0;
+  width: var(--sidebar-w);
+  height: 100vh;
+  border-right: 1px solid var(--line);
+  background: var(--surface);
+  transition: width 0.2s ease;
 }
 
-.sidebar.open {
-  width: var(--sidebar-width-open);
+.sidebar.collapsed {
+  width: var(--sidebar-w-collapsed);
 }
 
-.sidebar.closed {
-  width: var(--sidebar-width-closed);
-}
-
-/* Контейнер хедера */
-.sidebar-header-wrapper {
-  display: flex;
-  flex-direction: column;
-}
-
-.sidebar-header {
+.sidebar-top {
   display: flex;
   align-items: center;
-  padding: 8px 16px;
-  height: 56px;
-}
-
-/* Раскрытый хедер */
-.sidebar-header.open {
   justify-content: space-between;
+  height: var(--header-h);
+  padding: 0 12px 0 16px;
+  border-bottom: 1px solid var(--line);
 }
 
-/* Свернутый хедер */
-.sidebar-header.closed {
-  flex-direction: column;
-  padding: 12px 0;
-  height: auto;
-  gap: 12px;
+.sidebar.collapsed .sidebar-top {
+  justify-content: center;
+  padding: 0;
 }
 
-.collapse-btn {
-  background: none;
-  border: none;
-  cursor: pointer;
+.brand {
   display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.brand-mark {
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  color: var(--text-color);
-  padding: 8px;
-  border-radius: 4px;
+  border-radius: 8px;
+  background: var(--accent);
+  color: var(--on-accent);
 }
 
-.collapse-btn:hover {
-  background-color: var(--hover-color);
+.brand-name {
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
 }
 
-.profile-btn {
-  padding: 0 !important;
-  background: none;
-  color: inherit;
-}
-
-/* Разделительная линия */
-.sidebar-divider {
-  border: none;
-  border-top: 1px solid var(--border-color);
-  margin: 0;
-  width: 100%;
-}
-
-/* Навигация */
-.nav-menu {
+.sidebar-nav {
   display: flex;
+  flex: 1;
   flex-direction: column;
-  padding: 8px 0;
-  gap: 4px;
+  gap: 2px;
+  min-height: 0;
+  padding: 12px 10px;
+  overflow-y: auto;
 }
 
 .nav-item {
-  color: var(--nav-text-inactive);
+  position: relative;
   display: flex;
   align-items: center;
-  padding: 10px 16px;
-  background: none;
+  gap: 11px;
+  width: 100%;
+  height: 38px;
+  padding: 0 10px;
   border: none;
-  cursor: pointer;
+  border-radius: var(--r-md);
+  background: none;
+  color: var(--text-2);
+  font-size: 14px;
+  font-weight: 500;
   text-align: left;
-  white-space: nowrap;
-  transition: background-color 0.2s;
-  gap: 12px;
+  transition: background 0.15s, color 0.15s;
 }
 
 .nav-item:hover {
-  background-color: var(--hover-color);
+  background: var(--surface-3);
+  color: var(--text);
 }
 
 .nav-item.active {
-  background-color: var(--hover-color);
-  color: var(--nav-text-active);
+  background: var(--surface-3);
+  color: var(--text);
 }
 
-/* Чтобы иконки в закрытом виде были по центру */
-.sidebar.closed .nav-item {
+.nav-item.active::before {
+  content: "";
+  position: absolute;
+  top: 9px;
+  bottom: 9px;
+  left: -10px;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: var(--accent);
+}
+
+.nav-item.active > .icon {
+  color: var(--accent);
+}
+
+.sidebar.collapsed .nav-item {
   justify-content: center;
-  padding: 10px 0;
+  padding: 0;
 }
 
-.nav-text {
+.nav-label {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.nav-icon-svg {
-  width: var(--icon-size) !important;
-  height: var(--icon-size) !important;
-  display: block;
-  flex-shrink: 0;
-  color: var(--icon-inactive);
-}
-
-.nav-item.active .nav-icon-svg,
-.nav-item:hover .nav-icon-svg {
-  color: var(--icon-active);
-}
-
-/* Контролируем толщину линий и предотвращаем масштабирование stroke */
-.nav-icon-svg {
-  vector-effect: non-scaling-stroke;
-}
-
-.nav-icon-svg path,
-.nav-icon-svg circle,
-.nav-icon-svg rect,
-.nav-icon-svg line,
-.nav-icon-svg polyline,
-.nav-icon-svg polygon {
-  stroke-width: var(--icon-stroke-width) !important;
-  stroke-linecap: round !important;
-  stroke-linejoin: round !important;
-}
-
-/* Футер сайдбара */
-.sidebar-footer {
-  margin-top: auto;
-  padding: 16px;
-  border-top: 1px solid var(--border-color);
-  font-size: 12px;
-  color: #8e8e93;
-}
-
-.select-company {
-  margin-top: 8px;
-  cursor: pointer;
-  display: flex;
-  justify-content: space-between;
+.nav-count {
+  display: inline-flex;
   align-items: center;
-  color: var(--text-color);
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: 11px;
+  font-weight: 700;
 }
 
-/* Гарантируем, что все SVG в сайдбаре точно 20x20px */
-.sidebar .nav-icon-svg,
-.sidebar .collapse-btn .nav-icon-svg,
-.sidebar .sidebar-header .nav-icon-svg {
-  width: 20px !important;
-  height: 20px !important;
-  min-width: 20px;
-  min-height: 20px;
+.sidebar.collapsed .nav-count {
+  position: absolute;
+  top: 3px;
+  right: 6px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  font-size: 10px;
+}
+
+.nav-section {
+  margin: 18px 10px 6px;
+  color: var(--text-3);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.nav-divider {
+  margin: 10px 6px;
+}
+
+.project-dot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.nav-item.active .project-dot {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+
+.sidebar-bottom {
+  padding: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.sidebar-bottom .nav-item {
+  height: 44px;
 }
