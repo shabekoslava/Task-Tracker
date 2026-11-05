@@ -1,122 +1,101 @@
-/* Minimal, non-duplicating styles for MyProfile page */
 .profile-page {
-  padding: 20px 24px;
-  background: var(--bg-app);
-  color: var(--text-color);
+  max-width: 920px;
 }
 
-.profile-title {
-  margin: 0 0 18px 0;
-  font-size: 20px;
-  font-weight: 600;
-}
-
-.profile-cards {
+.profile-hero {
   display: flex;
-  flex-direction: row;
-  flex-wrap: wrap;
-  gap: 16px;
-  align-items: stretch;
-}
-
-/* Small helpers for labels and spacing; inputs/buttons are styled in Card.css */
-.profile-cards label {
-  display: block;
-  margin-bottom: 6px;
-  color: var(--nav-text-inactive);
-  font-size: 13px;
-}
-
-/* make inline action groups consistent */
-.profile-cards .actions-row {
-  display: flex;
-  gap: 8px;
-  margin-top: 8px;
-}
-
-/* Avatar styles */
-.avatar-section {
-  display: flex;
-  flex-direction: column;
   align-items: center;
-  gap: 12px;
+  gap: 22px;
+  margin-bottom: 16px;
+  padding: 24px;
+  background:
+    radial-gradient(circle at 0% 0%, var(--accent-soft), transparent 45%),
+    var(--surface);
 }
 
-.avatar-image {
-  width: 100px;
-  height: 100px;
+.profile-avatar {
+  position: relative;
+  flex-shrink: 0;
+  padding: 0;
+  border: none;
   border-radius: 50%;
-  object-fit: cover;
-  border: 2px solid var(--border-color);
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  background: none;
 }
 
-.avatar-image:hover {
-  border-color: var(--primary-color);
-  transform: scale(1.03);
-}
-
-/* Avatar placeholder with futuristic geometric pattern */
-.avatar-placeholder {
+.profile-avatar-overlay {
+  position: absolute;
+  inset: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  background-color: transparent;
-  background-image: 
-    radial-gradient(circle at 20% 30%, rgba(99, 102, 241, 0.15), transparent 60%),
-    radial-gradient(circle at 80% 70%, rgba(236, 72, 153, 0.2), transparent 60%),
-    linear-gradient(135deg, rgba(30, 41, 59, 0.1) 0%, rgba(15, 23, 42, 0.2) 100%);
-  background-size: cover;
-  position: relative;
-  overflow: hidden;
-  cursor: pointer;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.45);
+  color: #fff;
+  opacity: 0;
+  transition: opacity 0.15s;
 }
 
-.avatar-placeholder::before {
-  content: "";
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  opacity: 0.15;
-  background-image: 
-    radial-gradient(rgba(255, 255, 255, 0.15) 1px, transparent 0),
-    radial-gradient(rgba(255, 255, 255, 0.1) 1px, transparent 0);
-  background-size: 8px 8px;
-  background-position: 0 0, 4px 4px;
-}
-
-.avatar-placeholder:hover {
-  border-color: var(--primary-color);
-  box-shadow: 0 0 20px rgba(99, 102, 241, 0.25);
-}
-
-.avatar-placeholder-icon {
-  width: 32px;
-  height: 32px;
-  color: var(--nav-text-inactive);
-  opacity: 0.7;
-  z-index: 1;
-  transition: all 0.3s ease;
-}
-
-.avatar-placeholder:hover .avatar-placeholder-icon {
-  color: var(--primary-color);
-  transform: scale(1.1);
+.profile-avatar:hover .profile-avatar-overlay,
+.profile-avatar:focus-visible .profile-avatar-overlay {
   opacity: 1;
 }
 
-.avatar-input {
-  padding: 8px;
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  background: transparent;
-  color: var(--text-color);
+.profile-hero-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  min-width: 0;
 }
 
-@media (max-width: 480px) {
-  .profile-page {
-    padding: 12px;
+.profile-hero-text h1 {
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.profile-hero-text .id-chip {
+  margin-top: 4px;
+}
+
+.profile-hero-actions {
+  display: flex;
+  align-self: flex-start;
+  gap: 6px;
+}
+
+.profile-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  align-items: start;
+}
+
+.profile-section {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.profile-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+@media (max-width: 760px) {
+  .profile-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .profile-hero {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 16px;
+  }
+
+  .profile-hero-actions {
+    align-self: stretch;
   }
 }

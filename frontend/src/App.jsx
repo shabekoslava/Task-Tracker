@@ -1,1049 +1,620 @@
-// src/App.jsx
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import Sidebar from "./components/Sidebar/Sidebar";
 import ProjectBoard from "./components/ProjectBoard/ProjectBoard";
+import Toaster from "./components/Toaster/Toaster";
+import Icon from "./components/Icon/Icon";
 import MyProfile from "./pages/MyProfile/MyProfile";
 import MyTasks from "./pages/MyTasks/MyTasks";
 import MyProjects from "./pages/MyProjects/MyProject";
 import Messenger from "./pages/Messenger/Messenger";
 import Auth from "./pages/Auth/Auth";
 import Invite from "./pages/invite/Invite";
+import { api, clearToken, getToken } from "./lib/api";
+import { toast } from "./lib/toast";
+import { DEFAULT_PROJECT_TAGS } from "./lib/format";
 import "./App.css";
 
+const SYNC_DELAY_MS = 400;
+
+const readJson = (key, fallback) => {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : fallback;
+  } catch {
+    return fallback;
+  }
+};
+
+const PAGE_TITLES = {
+  tasks: "Мои задачи",
+  projects: "Проекты",
+  messenger: "Мессенджер",
+  invites: "Приглашения",
+  profile: "Профиль",
+};
+
 export default function App() {
-  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
-  const [currentTab, setCurrentTab] = useState("Мои задачи");
-  const [isDark, setIsDark] = useState(true);
-  const [initialProjectTab, setInitialProjectTab] = useState("board"); // "board" | "settings"
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() => window.innerWidth < 900);
+  const [currentTab, setCurrentTab] = useState("tasks");
+  const [theme, setTheme] = useState(() => localStorage.getItem("theme") || "dark");
+  const [initialProjectTab, setInitialProjectTab] = useState("board");
   const [initialActiveTaskId, setInitialActiveTaskId] = useState(null);
   const [openedFromMyTasks, setOpenedFromMyTasks] = useState(false);
 
-  // 👤 Auth State: loaded from localStorage session
-  const [currentUser, setCurrentUser] = useState(() => {
-    const session = localStorage.getItem("active_user_session");
-    return session ? JSON.parse(session) : null;
-  });
+  const [currentUser, setCurrentUser] = useState(() =>
+    getToken() ? readJson("active_user_session", null) : null,
+  );
+  const currentUserId = currentUser?.id || "";
 
-  const currentUserId = currentUser ? currentUser.id : "";
+  // Кэш в localStorage нужен только для мгновенной отрисовки до ответа сервера
+  const [projects, setProjects] = useState(() => readJson("project_tracker_projects", []));
+  const [invitations, setInvitations] = useState(() => readJson("project_invitations", []));
+  const [chats, setChats] = useState(() => readJson("project_tracker_chats", []));
+  const [users, setUsers] = useState(() => readJson("auth_users", []));
 
-  // 📂 Projects State: loaded from localStorage or initialized with default projects
-  const [projects, setProjects] = useState(() => {
-    const storedProjects = localStorage.getItem("project_tracker_projects");
-    return storedProjects ? JSON.parse(storedProjects) : [];
-  });
+  // /api/sync перезаписывает данные целиком, поэтому пушим только после загрузки
+  // с сервера и только то, что реально изменилось (иначе пустой кэш нового
+  // браузера стёр бы всю базу, а входящие обновления отправлялись бы обратно).
+  const isServerStateLoadedRef = useRef(false);
+  const lastSyncedRef = useRef({ board: null, invitations: null });
 
-  // ✉️ Invitations State: loaded from localStorage
-  const [invitations, setInvitations] = useState(() => {
-    const storedInvites = localStorage.getItem("project_invitations");
-    return storedInvites ? JSON.parse(storedInvites) : [];
-  });
+  const handleLogout = useCallback(() => {
+    clearToken();
+    localStorage.removeItem("active_user_session");
+    isServerStateLoadedRef.current = false;
+    lastSyncedRef.current = { board: null, invitations: null };
+    setCurrentUser(null);
+    setCurrentTab("tasks");
+  }, []);
 
-  // 💬 Chats State: loaded from localStorage
-  const [chats, setChats] = useState(() => {
-    const storedChats = localStorage.getItem("project_tracker_chats");
-    return storedChats ? JSON.parse(storedChats) : [];
-  });
+  const applyServerState = useCallback((data) => {
+    lastSyncedRef.current = {
+      board: JSON.stringify({ projects: data.projects || [], chats: data.chats || [] }),
+      invitations: JSON.stringify(data.invitations || []),
+    };
+    setProjects(data.projects || []);
+    setChats(data.chats || []);
+    setInvitations(data.invitations || []);
+    setUsers(data.users || []);
+    isServerStateLoadedRef.current = true;
+  }, []);
 
-  const wsRef = useRef(null);
-  const isIncomingSyncRef = useRef(false);
+  const loadState = useCallback(
+    () =>
+      api("/api/all_data")
+        .then(applyServerState)
+        .catch((err) => {
+          if (err.status === 401) {
+            handleLogout();
+            toast("Сессия истекла, войдите снова", "error");
+          } else {
+            toast(err.message, "error");
+          }
+        }),
+    [applyServerState, handleLogout],
+  );
 
-  // ⚡ Initialize Reconnecting WebSocket Connection for Real-Time State Sync
   useEffect(() => {
+    if (currentUserId) loadState();
+  }, [currentUserId, loadState]);
+
+  // Другие клиенты сохранили изменения → перечитываем состояние
+  useEffect(() => {
+    if (!currentUserId) return undefined;
     let socket;
-    let reconnectTimeout;
+    let retryTimer;
+    let closed = false;
 
-    const connectWS = () => {
+    const connect = () => {
       const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-      const host = window.location.host;
-      const wsUrl = `${protocol}//${host}/ws`;
-
-      console.log("⚡ Connecting to real-time WebSockets sync:", wsUrl);
-      socket = new WebSocket(wsUrl);
-      wsRef.current = socket;
-
+      socket = new WebSocket(`${protocol}//${window.location.host}/ws`);
       socket.onmessage = (event) => {
         try {
-          const data = JSON.parse(event.data);
-          
-          if (data.event === "state_synced") {
-            console.log("⚡ Database state synced event received. Fetching fresh data from API...");
-            fetch("/api/all_data")
-              .then((res) => {
-                if (!res.ok) throw new Error("API Offline");
-                return res.json();
-              })
-              .then((freshData) => {
-                isIncomingSyncRef.current = true;
-                if (freshData.projects) {
-                  localStorage.setItem("project_tracker_projects", JSON.stringify(freshData.projects));
-                  setProjects(freshData.projects);
-                }
-                if (freshData.chats) {
-                  localStorage.setItem("project_tracker_chats", JSON.stringify(freshData.chats));
-                  setChats(freshData.chats);
-                }
-                if (freshData.invitations) {
-                  localStorage.setItem("project_invitations", JSON.stringify(freshData.invitations));
-                  setInvitations(freshData.invitations);
-                }
-                if (freshData.users && freshData.users.length > 0) {
-                  localStorage.setItem("auth_users", JSON.stringify(freshData.users));
-                }
-              })
-              .catch((err) => console.error("Error fetching fresh data after sync event:", err));
-          } else if (data.type === "SYNC_STATE") {
-            console.log("⚡ Real-time WebSocket peer sync update received:", data);
-            isIncomingSyncRef.current = true;
-            if (data.projects) {
-              localStorage.setItem(
-                "project_tracker_projects",
-                JSON.stringify(data.projects),
-              );
-              setProjects(data.projects);
-            }
-            if (data.chats) {
-              localStorage.setItem(
-                "project_tracker_chats",
-                JSON.stringify(data.chats),
-              );
-              setChats(data.chats);
-            }
-          }
-        } catch (err) {
-          console.error("Failed to parse WebSocket sync message:", err);
+          if (JSON.parse(event.data).event === "state_synced") loadState();
+        } catch {
+          /* посторонние сообщения игнорируем */
         }
       };
-
-
       socket.onclose = () => {
-        console.log("⚡ WebSocket connection closed. Reconnecting in 3s...");
-        reconnectTimeout = setTimeout(connectWS, 3000);
-      };
-
-      socket.onerror = (err) => {
-        console.error("⚡ WebSocket error:", err);
-        socket.close();
+        if (!closed) retryTimer = setTimeout(connect, 3000);
       };
     };
 
-    connectWS();
-
+    connect();
     return () => {
-      if (socket) {
-        socket.onclose = null;
-        socket.close();
-      }
-      clearTimeout(reconnectTimeout);
+      closed = true;
+      clearTimeout(retryTimer);
+      socket?.close();
     };
-  }, []);
+  }, [currentUserId, loadState]);
+
+  useEffect(() => {
+    localStorage.setItem("project_tracker_projects", JSON.stringify(projects));
+    localStorage.setItem("project_tracker_chats", JSON.stringify(chats));
+    if (!isServerStateLoadedRef.current) return undefined;
+
+    const payload = JSON.stringify({ projects, chats });
+    if (payload === lastSyncedRef.current.board) return undefined;
+
+    const timer = setTimeout(() => {
+      lastSyncedRef.current.board = payload;
+      api("/api/sync", { method: "POST", body: { projects, chats } }).catch((err) =>
+        toast(`Не удалось сохранить изменения: ${err.message}`, "error"),
+      );
+    }, SYNC_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [projects, chats]);
+
+  useEffect(() => {
+    localStorage.setItem("project_invitations", JSON.stringify(invitations));
+    if (!isServerStateLoadedRef.current) return undefined;
+
+    const payload = JSON.stringify(invitations);
+    if (payload === lastSyncedRef.current.invitations) return undefined;
+
+    const timer = setTimeout(() => {
+      lastSyncedRef.current.invitations = payload;
+      api("/api/sync", { method: "POST", body: { invitations } }).catch((err) =>
+        toast(`Не удалось сохранить приглашения: ${err.message}`, "error"),
+      );
+    }, SYNC_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [invitations]);
+
+  useEffect(() => {
+    localStorage.setItem("auth_users", JSON.stringify(users));
+  }, [users]);
+
+  useEffect(() => {
+    document.body.classList.toggle("light-theme", theme === "light");
+    localStorage.setItem("theme", theme);
+  }, [theme]);
 
   const selectedProject = currentTab.startsWith("project-")
     ? projects.find((project) => currentTab === `project-${project.id}`)
     : null;
 
-  // Sync state initially from FastAPI if active
   useEffect(() => {
-    fetch("/api/all_data")
-      .then((res) => {
-        if (!res.ok) throw new Error("API Offline");
-        return res.json();
-      })
-      .then((data) => {
-        console.log("State synchronized from FastAPI:", data);
-        if (data.projects) {
-          localStorage.setItem(
-            "project_tracker_projects",
-            JSON.stringify(data.projects),
-          );
-          setProjects(data.projects);
-        }
-        if (data.invitations) {
-          localStorage.setItem(
-            "project_invitations",
-            JSON.stringify(data.invitations),
-          );
-          setInvitations(data.invitations);
-        }
-        if (data.users && data.users.length > 0) {
-          localStorage.setItem("auth_users", JSON.stringify(data.users));
-        }
-        if (data.chats) {
-          localStorage.setItem(
-            "project_tracker_chats",
-            JSON.stringify(data.chats),
-          );
-          setChats(data.chats);
-        }
-      })
-      .catch((err) => {
-        console.log(
-          "FastAPI offline, using offline localStorage mode:",
-          err.message,
-        );
-      });
-  }, []);
+    const title = selectedProject ? selectedProject.name : PAGE_TITLES[currentTab];
+    document.title = title ? `${title} — Task Tracker` : "Task Tracker";
+  }, [currentTab, selectedProject]);
 
-  // Sync projects and chats with localStorage, backend, and WebSockets
-  useEffect(() => {
-    localStorage.setItem("project_tracker_projects", JSON.stringify(projects));
-    localStorage.setItem("project_tracker_chats", JSON.stringify(chats));
+  const userProjects = projects.filter((p) => p.members?.some((m) => m.id === currentUserId));
 
-    // If this update was triggered by an incoming WebSocket sync, prevent loop
-    if (isIncomingSyncRef.current) {
-      setTimeout(() => {
-        isIncomingSyncRef.current = false;
-      }, 100);
-      return;
-    }
-
-    // Broadcast state mutation to other clients over WebSocket
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(
-        JSON.stringify({
-          type: "SYNC_STATE",
-          projects,
-          chats,
-        }),
-      );
-    }
-
-    // Background push to backend
-    const users = JSON.parse(localStorage.getItem("auth_users") || "[]");
-    fetch("/api/sync", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ projects, users, chats }),
-    }).catch((err) =>
-      console.log("Failed to sync projects to FastAPI:", err.message),
-    );
-  }, [projects, chats]);
-
-  // Sync invitations with localStorage and backend
-  useEffect(() => {
-    localStorage.setItem("project_invitations", JSON.stringify(invitations));
-
-    if (isIncomingSyncRef.current) {
-      setTimeout(() => {
-        isIncomingSyncRef.current = false;
-      }, 100);
-      return;
-    }
-
-    // Background push to backend
-    fetch("/api/sync", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ invitations }),
-    }).catch((err) =>
-      console.log("Failed to sync invitations to FastAPI:", err.message),
-    );
-  }, [invitations]);
-
-  // Sync registered users when currentUser logs in/out
-  useEffect(() => {
-    if (currentUser) {
-      const users = JSON.parse(localStorage.getItem("auth_users") || "[]");
-      
-      if (isIncomingSyncRef.current) {
-        setTimeout(() => {
-          isIncomingSyncRef.current = false;
-        }, 100);
-        return;
-      }
-
-      fetch("/api/sync", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ users }),
-      }).catch((err) =>
-        console.log("Failed to sync users to FastAPI:", err.message),
-      );
-    }
-  }, [currentUser]);
-
-  // Handle page resize for responsive sidebar
-  useEffect(() => {
-    const handleResize = () => {
-      const minWidthForSidebar = 768;
-      if (window.innerWidth < minWidthForSidebar && isSidebarOpen) {
-        setIsSidebarOpen(false);
-      }
-    };
-
-    window.addEventListener("resize", handleResize);
-    handleResize();
-
-    return () => window.removeEventListener("resize", handleResize);
-  }, [isSidebarOpen]);
-
-  // Update window title dynamically
-  useEffect(() => {
-    document.title = `${currentTab} — Task Tracker`;
-  }, [currentTab]);
-
-  const toggleTheme = () => {
-    setIsDark(!isDark);
-    document.body.classList.toggle("light-theme");
-  };
-
-  // --- Auth Callbacks ---
   const handleLoginSuccess = (sessionData) => {
+    localStorage.setItem("active_user_session", JSON.stringify(sessionData));
     setCurrentUser(sessionData);
-    setCurrentTab("Мои задачи");
+    setCurrentTab("tasks");
   };
 
-  const handleLogout = () => {
-    localStorage.removeItem("active_user_session");
-    localStorage.removeItem("auth_token");
-    setCurrentUser(null);
-    setCurrentTab("Мои задачи");
-  };
-
-  // --- Invitation Callbacks ---
-  const handleJoinProjectById = (projectId, role = "member") => {
-    const targetProject = projects.find((p) => p.id === projectId);
-    if (!targetProject) return false;
-
-    // Check if already a member
-    if (targetProject.members.some((m) => m.id === currentUserId)) {
-      return false;
-    }
-
-    setProjects((prev) =>
-      prev.map((project) => {
-        if (project.id !== projectId) return project;
-        return {
-          ...project,
-          members: [...project.members, { id: currentUserId, role: role }],
-        };
-      }),
+  const handleProfileUpdate = (sessionData) => {
+    localStorage.setItem("active_user_session", JSON.stringify(sessionData));
+    setCurrentUser(sessionData);
+    setUsers((prev) =>
+      prev.map((u) => (u.id === sessionData.id ? { ...u, ...sessionData } : u)),
     );
+  };
 
+  // ---------------------------------------------------------------------------
+  // Проекты и приглашения
+  // ---------------------------------------------------------------------------
+  const updateProject = (projectId, update) =>
+    setProjects((prev) => prev.map((p) => (p.id === projectId ? update(p) : p)));
+
+  const handleJoinProjectById = (projectId, role = "member") => {
+    const target = projects.find((p) => p.id === projectId);
+    if (!target || target.members.some((m) => m.id === currentUserId)) return false;
+    updateProject(projectId, (p) => ({ ...p, members: [...p.members, { id: currentUserId, role }] }));
     return true;
   };
 
-  const handleSendInvite = (projectId, targetUserId, role = "member") => {
-    const targetProject = projects.find((p) => p.id === projectId);
-    if (!targetProject) {
-      return { success: false, message: "Проект не найден" };
-    }
+  const handleSendInvite = (projectId, rawUserId, role = "member") => {
+    const project = projects.find((p) => p.id === projectId);
+    if (!project) return { success: false, message: "Проект не найден" };
 
-    // Verify if recipient exists in registered users
-    const registeredUsers = JSON.parse(
-      localStorage.getItem("auth_users") || "[]",
+    const recipient = users.find((u) => u.id.toUpperCase() === rawUserId.trim().toUpperCase());
+    if (!recipient) {
+      return { success: false, message: `Пользователь ${rawUserId.trim()} не зарегистрирован` };
+    }
+    if (recipient.id === currentUserId) {
+      return { success: false, message: "Нельзя пригласить самого себя" };
+    }
+    if (project.members.some((m) => m.id === recipient.id)) {
+      return { success: false, message: `${recipient.name} уже в проекте` };
+    }
+    const duplicate = invitations.some(
+      (inv) => inv.projectId === projectId && inv.invitedUser === recipient.id && inv.status === "pending",
     );
-    const recipientUser = registeredUsers.find(
-      (u) => u.id.toUpperCase() === targetUserId.toUpperCase(),
-    );
-
-    if (!recipientUser) {
-      return {
-        success: false,
-        message: `Пользователь с ID ${targetUserId} не зарегистрирован`,
-      };
-    }
-    
-    // Normalize case to exactly match the database
-    const exactTargetUserId = recipientUser.id;
-
-    // Check if target is already in project members
-    if (
-      targetProject.members.some(
-        (m) => m.id === exactTargetUserId,
-      )
-    ) {
-      return {
-        success: false,
-        message: "Пользователь уже является участником этого проекта",
-      };
+    if (duplicate) {
+      return { success: false, message: `${recipient.name} уже приглашён в этот проект` };
     }
 
-    // Check if a pending invite already exists
-    const duplicateInvite = invitations.some(
-      (inv) =>
-        inv.projectId === projectId &&
-        inv.invitedUser === exactTargetUserId &&
-        inv.status === "pending",
-    );
-
-    if (duplicateInvite) {
-      return {
-        success: false,
-        message: "Приглашение этому пользователю уже отправлено",
-      };
-    }
-
-    // Generate new invite
-    const newInvite = {
-      id: `inv-${Date.now()}`,
-      projectId,
-      projectName: targetProject.name,
-      invitedBy: currentUserId,
-      invitedUser: exactTargetUserId,
-      status: "pending",
-      role: role,
-    };
-
-    setInvitations((prev) => [...prev, newInvite]);
-    return {
-      success: true,
-      message: `Приглашение успешно отправлено для ${exactTargetUserId}!`,
-    };
+    setInvitations((prev) => [
+      ...prev,
+      {
+        id: `inv-${Date.now()}`,
+        projectId,
+        projectName: project.name,
+        invitedBy: currentUserId,
+        invitedUser: recipient.id,
+        status: "pending",
+        role,
+        created_at: new Date().toISOString(),
+      },
+    ]);
+    return { success: true, message: `Приглашение отправлено: ${recipient.name}` };
   };
+
+  const setInviteStatus = (inviteId, status) =>
+    setInvitations((prev) => prev.map((inv) => (inv.id === inviteId ? { ...inv, status } : inv)));
 
   const handleAcceptInvite = (inviteId, projectId) => {
-    // Find the invitation object to get the assigned role
-    const inviteObj = invitations.find((inv) => inv.id === inviteId);
-    const selectedRole = inviteObj ? inviteObj.role || "member" : "member";
-
-    // 1. Join project with custom role
-    const success = handleJoinProjectById(projectId, selectedRole);
-
-    // 2. Mark invitation status as accepted
-    setInvitations((prev) =>
-      prev.map((inv) =>
-        inv.id === inviteId ? { ...inv, status: "accepted" } : inv,
-      ),
-    );
-
-    if (success) {
-      alert("Добро пожаловать в проект! Приглашение успешно принято.");
-      setCurrentTab(`project-${projectId}`);
+    const invite = invitations.find((inv) => inv.id === inviteId);
+    const joined = handleJoinProjectById(projectId, invite?.role || "member");
+    setInviteStatus(inviteId, "accepted");
+    if (joined) {
+      toast(`Вы присоединились к проекту «${invite?.projectName || ""}»`);
+      openProject(projectId);
     } else {
-      alert("Не удалось войти: вы уже состоите в этом проекте.");
+      toast("Вы уже состоите в этом проекте", "error");
     }
   };
 
-  const handleDeclineInvite = (inviteId) => {
-    setInvitations((prev) =>
-      prev.map((inv) =>
-        inv.id === inviteId ? { ...inv, status: "declined" } : inv,
-      ),
-    );
-  };
-
-  const handleCancelInvite = (inviteId) => {
-    setInvitations((prev) => prev.filter((inv) => inv.id !== inviteId));
-  };
-
-  const handleClearInviteHistory = () => {
-    setInvitations((prev) => prev.filter((inv) => inv.status === "pending"));
-  };
-
-  // --- Project Board Callbacks ---
   const createProject = (name) => {
     const trimmed = name.trim();
     if (!trimmed) return false;
-
     const projectId = String(Date.now());
-    const nextProject = {
-      id: projectId,
-      name: trimmed,
-      description: "",
-      members: [{ id: currentUserId, role: "admin" }],
-      tags: ["дизайн", "баг", "срочно", "фича", "фронтенд", "бэкенд"],
-      columns: [
-        { id: `${projectId}-todo`, name: "В ожидании", taskIds: [] },
-        { id: `${projectId}-inwork`, name: "В работе", taskIds: [] },
-        { id: `${projectId}-review`, name: "На проверку", taskIds: [] },
-        { id: `${projectId}-done`, name: "Выполнено", taskIds: [] },
-      ],
-      tasks: {},
-    };
-
-    setProjects((prev) => [...prev, nextProject]);
-    setInitialProjectTab("settings");
-    setCurrentTab(`project-${nextProject.id}`);
+    setProjects((prev) => [
+      ...prev,
+      {
+        id: projectId,
+        name: trimmed,
+        description: "",
+        members: [{ id: currentUserId, role: "admin" }],
+        tags: [...DEFAULT_PROJECT_TAGS],
+        columns: [
+          { id: `${projectId}-todo`, name: "В ожидании", taskIds: [] },
+          { id: `${projectId}-inwork`, name: "В работе", taskIds: [] },
+          { id: `${projectId}-review`, name: "На проверке", taskIds: [] },
+          { id: `${projectId}-done`, name: "Готово", taskIds: [] },
+        ],
+        tasks: {},
+      },
+    ]);
+    openProject(projectId, "board");
     return true;
-  };
-
-  const editProject = (projectId, updates) => {
-    setProjects((prev) =>
-      prev.map((project) => {
-        if (project.id !== projectId) return project;
-        return {
-          ...project,
-          ...updates,
-        };
-      }),
-    );
-  };
-
-  const inviteUser = (projectId, userId, role = "member") => {
-    const trimmed = userId.trim();
-    if (!trimmed) return false;
-
-    setProjects((prev) =>
-      prev.map((project) => {
-        if (project.id !== projectId) return project;
-        if (project.members.some((m) => m.id === trimmed)) return project;
-        return {
-          ...project,
-          members: [...project.members, { id: trimmed, role: role }],
-        };
-      }),
-    );
-
-    return true;
-  };
-
-  const sendInvitation = (projectId, userId, role = "member") => {
-    const trimmed = userId.trim();
-    if (!trimmed) return false;
-
-    const project = projects.find((p) => p.id === projectId);
-    if (!project) return false;
-
-    if (project.members.some((m) => m.id === trimmed)) {
-      alert("Пользователь уже состоит в этом проекте!");
-      return false;
-    }
-
-    const newInvite = {
-      id: `inv-${Date.now()}`,
-      projectId: projectId,
-      projectName: project.name,
-      invitedBy: currentUserId,
-      invitedUser: trimmed,
-      role: role,
-      status: "pending",
-      created_at: new Date().toISOString(),
-    };
-
-    setInvitations((prev) => [...prev, newInvite]);
-    alert("Приглашение успешно отправлено!");
-    return true;
-  };
-
-  const changeUserRole = (projectId, userId, newRole) => {
-    setProjects((prev) =>
-      prev.map((project) => {
-        if (project.id !== projectId) return project;
-        return {
-          ...project,
-          members: project.members.map((m) =>
-            m.id === userId ? { ...m, role: newRole } : m,
-          ),
-        };
-      }),
-    );
   };
 
   const leaveProject = (projectId, userId) => {
-    setProjects((prev) => {
-      const updatedProjects = prev.map((project) => {
-        if (project.id !== projectId) return project;
-        return {
-          ...project,
-          members: project.members.filter((m) => m.id !== userId),
-        };
-      });
-      return updatedProjects;
-    });
-
-    if (currentUserId === userId && currentTab === `project-${projectId}`) {
-      setCurrentTab("Мои проекты");
-    }
+    updateProject(projectId, (p) => ({ ...p, members: p.members.filter((m) => m.id !== userId) }));
+    if (userId === currentUserId && currentTab === `project-${projectId}`) setCurrentTab("projects");
   };
 
   const deleteProject = (projectId) => {
     setProjects((prev) => prev.filter((p) => p.id !== projectId));
-    if (currentTab === `project-${projectId}`) {
-      setCurrentTab("Мои проекты");
-    }
+    setInvitations((prev) => prev.filter((inv) => inv.projectId !== projectId));
+    setChats((prev) => prev.filter((c) => c.projectId !== projectId));
+    if (currentTab === `project-${projectId}`) setCurrentTab("projects");
   };
 
-  const addProjectTag = (projectId, tag) => {
-    const trimmed = tag.trim();
-    if (!trimmed) return;
-    setProjects((prev) =>
-      prev.map((project) => {
-        if (project.id !== projectId) return project;
-        const currentTags = project.tags || [
-          "дизайн",
-          "баг",
-          "срочно",
-          "фича",
-          "фронтенд",
-          "бэкенд",
-        ];
-        if (currentTags.includes(trimmed)) return project;
-        return { ...project, tags: [...currentTags, trimmed] };
+  const moveProject = (projectId, direction) =>
+    setProjects((prev) => {
+      const from = prev.findIndex((p) => p.id === projectId);
+      const to = from + direction;
+      if (from === -1 || to < 0 || to >= prev.length) return prev;
+      const next = [...prev];
+      [next[from], next[to]] = [next[to], next[from]];
+      return next;
+    });
+
+  // ---------------------------------------------------------------------------
+  // Доска: колонки и задачи
+  // ---------------------------------------------------------------------------
+  const boardActions = {
+    editProject: (projectId, updates) => updateProject(projectId, (p) => ({ ...p, ...updates })),
+
+    changeRole: (projectId, userId, role) =>
+      updateProject(projectId, (p) => ({
+        ...p,
+        members: p.members.map((m) => (m.id === userId ? { ...m, role } : m)),
+      })),
+
+    addTag: (projectId, tag) => {
+      const trimmed = tag.trim();
+      if (!trimmed) return;
+      updateProject(projectId, (p) => {
+        const tags = p.tags || DEFAULT_PROJECT_TAGS;
+        return tags.includes(trimmed) ? p : { ...p, tags: [...tags, trimmed] };
+      });
+    },
+
+    removeTag: (projectId, tag) =>
+      updateProject(projectId, (p) => ({
+        ...p,
+        tags: (p.tags || DEFAULT_PROJECT_TAGS).filter((t) => t !== tag),
+      })),
+
+    addColumn: (projectId, name) => {
+      const trimmed = name.trim();
+      if (!trimmed) return false;
+      const project = projects.find((p) => p.id === projectId);
+      if (project?.columns.some((c) => c.name.toLowerCase() === trimmed.toLowerCase())) {
+        toast("Колонка с таким названием уже есть", "error");
+        return false;
+      }
+      updateProject(projectId, (p) => ({
+        ...p,
+        columns: [...p.columns, { id: `column-${Date.now()}`, name: trimmed, taskIds: [] }],
+      }));
+      return true;
+    },
+
+    renameColumn: (projectId, columnId, name) => {
+      const trimmed = name.trim();
+      if (!trimmed) return;
+      updateProject(projectId, (p) => ({
+        ...p,
+        columns: p.columns.map((c) => (c.id === columnId ? { ...c, name: trimmed } : c)),
+      }));
+    },
+
+    // Удаляем колонку вместе с её задачами — раньше задачи оставались «висеть» без колонки
+    deleteColumn: (projectId, columnId) =>
+      updateProject(projectId, (p) => {
+        const column = p.columns.find((c) => c.id === columnId);
+        const tasks = { ...p.tasks };
+        column?.taskIds.forEach((id) => delete tasks[id]);
+        return { ...p, tasks, columns: p.columns.filter((c) => c.id !== columnId) };
       }),
-    );
-  };
 
-  const removeProjectTag = (projectId, tag) => {
-    setProjects((prev) =>
-      prev.map((project) => {
-        if (project.id !== projectId) return project;
-        const currentTags = project.tags || [
-          "дизайн",
-          "баг",
-          "срочно",
-          "фича",
-          "фронтенд",
-          "бэкенд",
-        ];
-        return { ...project, tags: currentTags.filter((t) => t !== tag) };
+    moveColumn: (projectId, columnId, direction) =>
+      updateProject(projectId, (p) => {
+        const from = p.columns.findIndex((c) => c.id === columnId);
+        const to = from + (direction === "left" ? -1 : 1);
+        if (from === -1 || to < 0 || to >= p.columns.length) return p;
+        const columns = [...p.columns];
+        [columns[from], columns[to]] = [columns[to], columns[from]];
+        return { ...p, columns };
       }),
-    );
-  };
 
-  const addColumn = (projectId, name) => {
-    const trimmed = name.trim();
-    if (!trimmed) return false;
+    addTask: (projectId, columnId, title) => {
+      const trimmed = title.trim();
+      if (!trimmed) return false;
+      const task = {
+        id: `task-${Date.now()}`,
+        title: trimmed,
+        description: "",
+        assignedTo: currentUserId,
+        tags: [],
+        deadline: "",
+        estimate: "",
+        sprint: "",
+        priority: "Средний",
+        completed: false,
+        comments: [],
+        createdAt: new Date().toISOString(),
+      };
+      updateProject(projectId, (p) => ({
+        ...p,
+        tasks: { ...p.tasks, [task.id]: task },
+        columns: p.columns.map((c) =>
+          c.id === columnId ? { ...c, taskIds: [...c.taskIds, task.id] } : c,
+        ),
+      }));
+      return true;
+    },
 
-    setProjects((prev) =>
-      prev.map((project) => {
-        if (project.id !== projectId) return project;
+    editTask: (projectId, taskId, updates) =>
+      updateProject(projectId, (p) =>
+        p.tasks[taskId] ? { ...p, tasks: { ...p.tasks, [taskId]: { ...p.tasks[taskId], ...updates } } } : p,
+      ),
+
+    deleteTask: (projectId, taskId) => {
+      updateProject(projectId, (p) => {
+        const tasks = { ...p.tasks };
+        delete tasks[taskId];
         return {
-          ...project,
-          columns: [
-            ...project.columns,
-            {
-              id: `column-${Date.now()}`,
-              name: trimmed,
-              taskIds: [],
-            },
-          ],
+          ...p,
+          tasks,
+          columns: p.columns.map((c) => ({ ...c, taskIds: c.taskIds.filter((id) => id !== taskId) })),
+        };
+      });
+      setChats((prev) => prev.filter((c) => c.taskId !== taskId));
+    },
+
+    addComment: (projectId, taskId, text) => {
+      const trimmed = text.trim();
+      if (!trimmed) return false;
+      const comment = {
+        id: `comment-${Date.now()}`,
+        text: trimmed,
+        createdAt: new Date().toISOString(),
+        authorId: currentUserId,
+      };
+      updateProject(projectId, (p) => {
+        const task = p.tasks[taskId];
+        if (!task) return p;
+        return {
+          ...p,
+          tasks: { ...p.tasks, [taskId]: { ...task, comments: [...(task.comments || []), comment] } },
+        };
+      });
+      return true;
+    },
+
+    toggleTaskComplete: (projectId, taskId) =>
+      updateProject(projectId, (p) => {
+        const task = p.tasks[taskId];
+        return task ? { ...p, tasks: { ...p.tasks, [taskId]: { ...task, completed: !task.completed } } } : p;
+      }),
+
+    moveTask: (projectId, taskId, targetColumnId) =>
+      updateProject(projectId, (p) => {
+        const source = p.columns.find((c) => c.taskIds.includes(taskId));
+        if (!source || source.id === targetColumnId) return p;
+        return {
+          ...p,
+          columns: p.columns.map((c) => {
+            if (c.id === source.id) return { ...c, taskIds: c.taskIds.filter((id) => id !== taskId) };
+            if (c.id === targetColumnId) return { ...c, taskIds: [...c.taskIds, taskId] };
+            return c;
+          }),
         };
       }),
-    );
 
-    return true;
+    invite: handleSendInvite,
+    leaveProject,
+    deleteProject,
   };
 
-  const renameColumn = (projectId, columnId, name) => {
-    const trimmed = name.trim();
-    if (!trimmed) return false;
-
-    setProjects((prev) =>
-      prev.map((project) => {
-        if (project.id !== projectId) return project;
-        return {
-          ...project,
-          columns: project.columns.map((column) =>
-            column.id === columnId ? { ...column, name: trimmed } : column,
-          ),
-        };
-      }),
-    );
-
-    return true;
-  };
-
-  const deleteColumn = (projectId, columnId) => {
-    setProjects((prev) =>
-      prev.map((project) => {
-        if (project.id !== projectId) return project;
-        return {
-          ...project,
-          columns: project.columns.filter((column) => column.id !== columnId),
-        };
-      }),
-    );
-  };
-
-  const moveColumn = (projectId, columnId, direction) => {
-    setProjects((prev) =>
-      prev.map((project) => {
-        if (project.id !== projectId) return project;
-        const columns = [...project.columns];
-        const index = columns.findIndex((col) => col.id === columnId);
-        if (index === -1) return project;
-
-        if (direction === "left" && index > 0) {
-          const temp = columns[index];
-          columns[index] = columns[index - 1];
-          columns[index - 1] = temp;
-        } else if (direction === "right" && index < columns.length - 1) {
-          const temp = columns[index];
-          columns[index] = columns[index + 1];
-          columns[index + 1] = temp;
-        }
-
-        return { ...project, columns };
-      }),
-    );
-  };
-
-  const addTask = (projectId, columnId, taskData) => {
-    const title = taskData.title?.trim();
-    if (!title) return false;
-
-    const newTask = {
-      id: `task-${Date.now()}`,
-      title,
-      description: taskData.description || "",
-      assignedTo: taskData.assignedTo || currentUserId,
-      tags: taskData.tags || [],
-      deadline: taskData.deadline || "",
-      estimate: taskData.estimate || "",
-      sprint: taskData.sprint || "",
-      priority: taskData.priority || "Средний",
-      completed: false,
-      comments: [],
-      createdAt: new Date().toISOString(),
-    };
-
-    setProjects((prev) =>
-      prev.map((project) => {
-        if (project.id !== projectId) return project;
-        return {
-          ...project,
-          tasks: {
-            ...project.tasks,
-            [newTask.id]: newTask,
-          },
-          columns: project.columns.map((column) =>
-            column.id === columnId
-              ? { ...column, taskIds: [...column.taskIds, newTask.id] }
-              : column,
-          ),
-        };
-      }),
-    );
-
-    return true;
-  };
-
-  const editTask = (projectId, taskId, updates) => {
-    setProjects((prev) =>
-      prev.map((project) => {
-        if (project.id !== projectId) return project;
-        const task = project.tasks[taskId];
-        if (!task) return project;
-        return {
-          ...project,
-          tasks: {
-            ...project.tasks,
-            [taskId]: {
-              ...task,
-              ...updates,
-              tags: updates.tags ?? task.tags,
-            },
-          },
-        };
-      }),
-    );
-  };
-
-  const deleteTask = (projectId, taskId) => {
-    setProjects((prev) =>
-      prev.map((project) => {
-        if (project.id !== projectId) return project;
-        const updatedTasks = { ...project.tasks };
-        delete updatedTasks[taskId];
-        const updatedColumns = project.columns.map((column) => ({
-          ...column,
-          taskIds: column.taskIds.filter((id) => id !== taskId),
-        }));
-        return {
-          ...project,
-          tasks: updatedTasks,
-          columns: updatedColumns,
-        };
-      }),
-    );
-  };
-
-  const addComment = (projectId, taskId, text) => {
-    const trimmed = text.trim();
-    if (!trimmed) return false;
-
-    setProjects((prev) =>
-      prev.map((project) => {
-        if (project.id !== projectId) return project;
-        const task = project.tasks[taskId];
-        if (!task) return project;
-        return {
-          ...project,
-          tasks: {
-            ...project.tasks,
-            [taskId]: {
-              ...task,
-              comments: [
-                ...task.comments,
-                {
-                  id: `comment-${Date.now()}`,
-                  text: trimmed,
-                  createdAt: new Date().toISOString(),
-                  authorId: currentUserId,
-                },
-              ],
-            },
-          },
-        };
-      }),
-    );
-
-    return true;
-  };
-
-  const toggleTaskComplete = (projectId, taskId) => {
-    setProjects((prev) =>
-      prev.map((project) => {
-        if (project.id !== projectId) return project;
-        const task = project.tasks[taskId];
-        if (!task) return project;
-        return {
-          ...project,
-          tasks: {
-            ...project.tasks,
-            [taskId]: {
-              ...task,
-              completed: !task.completed,
-            },
-          },
-        };
-      }),
-    );
-  };
-
-  const moveTask = (projectId, taskId, targetColumnId) => {
-    setProjects((prev) =>
-      prev.map((project) => {
-        if (project.id !== projectId) return project;
-        const sourceColumns = project.columns.map((column) => {
-          if (column.taskIds.includes(taskId)) {
-            return {
-              ...column,
-              taskIds: column.taskIds.filter((id) => id !== taskId),
-            };
-          }
-          return column;
-        });
-        return {
-          ...project,
-          columns: sourceColumns.map((column) =>
-            column.id === targetColumnId
-              ? { ...column, taskIds: [...column.taskIds, taskId] }
-              : column,
-          ),
-        };
-      }),
-    );
-  };
-
-  const openProject = (projectId, initialTab = "board") => {
+  function openProject(projectId, initialTab = "board") {
     setInitialProjectTab(initialTab);
     setCurrentTab(`project-${projectId}`);
+  }
+
+  const openTask = (projectId, taskId) => {
+    setOpenedFromMyTasks(currentTab === "tasks");
+    setInitialActiveTaskId(taskId);
+    openProject(projectId);
   };
 
-  const moveProjectUp = (projectId) => {
-    setProjects((prev) => {
-      const index = prev.findIndex((p) => p.id === projectId);
-      if (index <= 0) return prev;
-      const updated = [...prev];
-      const temp = updated[index];
-      updated[index] = updated[index - 1];
-      updated[index - 1] = temp;
-      return updated;
-    });
-  };
-
-  const moveProjectDown = (projectId) => {
-    setProjects((prev) => {
-      const index = prev.findIndex((p) => p.id === projectId);
-      if (index === -1 || index >= prev.length - 1) return prev;
-      const updated = [...prev];
-      const temp = updated[index];
-      updated[index] = updated[index + 1];
-      updated[index + 1] = temp;
-      return updated;
-    });
-  };
-
-  // --- Filtering Received & Sent Invites for children ---
   const receivedInvites = invitations.filter(
-    (inv) =>
-      inv.invitedUser.toUpperCase() === currentUserId.toUpperCase() &&
-      inv.status === "pending",
+    (inv) => inv.invitedUser?.toUpperCase() === currentUserId.toUpperCase() && inv.status === "pending",
   );
-
   const sentInvites = invitations.filter(
-    (inv) => inv.invitedBy.toUpperCase() === currentUserId.toUpperCase(),
+    (inv) => inv.invitedBy?.toUpperCase() === currentUserId.toUpperCase(),
   );
 
-  // --- Page Switcher ---
   const renderPage = () => {
-    if (currentTab.startsWith("project-") && selectedProject) {
+    if (selectedProject) {
       return (
         <ProjectBoard
+          key={`${selectedProject.id}:${initialProjectTab}`}
           project={selectedProject}
-          currentUserRole={
-            selectedProject.members.find((m) => m.id === currentUserId)?.role ||
-            "viewer"
-          }
-          members={selectedProject.members.map((m) => m.id)}
-          onAddColumn={addColumn}
-          onRenameColumn={renameColumn}
-          onDeleteColumn={deleteColumn}
-          onMoveColumn={moveColumn}
-          onAddTask={addTask}
-          onEditTask={editTask}
-          onDeleteTask={deleteTask}
-          onAddComment={addComment}
-          onToggleTaskComplete={toggleTaskComplete}
-          onMoveTask={moveTask}
-          onEditProject={editProject}
-          onInviteUser={sendInvitation}
-          onChangeRole={changeUserRole}
-          onLeaveProject={leaveProject}
-          onDeleteProject={deleteProject}
+          users={users}
           currentUserId={currentUserId}
+          currentUserRole={selectedProject.members.find((m) => m.id === currentUserId)?.role || "viewer"}
+          actions={boardActions}
           initialViewMode={initialProjectTab}
-          onAddProjectTag={addProjectTag}
-          onRemoveProjectTag={removeProjectTag}
           initialActiveTaskId={initialActiveTaskId}
           onClearInitialActiveTaskId={() => setInitialActiveTaskId(null)}
           onCloseTaskModal={() => {
             if (openedFromMyTasks) {
               setOpenedFromMyTasks(false);
-              setCurrentTab("Мои задачи");
+              setCurrentTab("tasks");
             }
           }}
         />
       );
     }
 
-    if (currentTab === "Мои проекты") {
-      return (
-        <MyProjects
-          projects={projects.filter((p) =>
-            Array.isArray(p.members) && p.members.some((m) => m.id === currentUserId),
-          )}
-          onCreateProject={createProject}
-          onInviteUser={sendInvitation}
-          onChangeRole={changeUserRole}
-          onLeaveProject={leaveProject}
-          onDeleteProject={deleteProject}
-          currentUserId={currentUserId}
-          openProject={openProject}
-          onMoveProjectUp={moveProjectUp}
-          onMoveProjectDown={moveProjectDown}
-        />
-      );
+    switch (currentTab) {
+      case "projects":
+        return (
+          <MyProjects
+            projects={userProjects}
+            users={users}
+            currentUserId={currentUserId}
+            onCreateProject={createProject}
+            onOpenProject={openProject}
+            onMoveProject={moveProject}
+          />
+        );
+      case "profile":
+        return <MyProfile user={currentUser} onLogout={handleLogout} onProfileUpdate={handleProfileUpdate} />;
+      case "messenger":
+        return (
+          <Messenger
+            chats={chats}
+            setChats={setChats}
+            projects={userProjects}
+            users={users}
+            currentUserId={currentUserId}
+            onAddComment={boardActions.addComment}
+            onOpenProject={openProject}
+            onOpenTask={openTask}
+          />
+        );
+      case "invites":
+        return (
+          <Invite
+            currentUserId={currentUserId}
+            projects={projects}
+            users={users}
+            receivedInvites={receivedInvites}
+            sentInvites={sentInvites}
+            onJoinProjectById={handleJoinProjectById}
+            onSendInvite={handleSendInvite}
+            onAcceptInvite={handleAcceptInvite}
+            onDeclineInvite={(id) => setInviteStatus(id, "declined")}
+            onCancelInvite={(id) => setInvitations((prev) => prev.filter((inv) => inv.id !== id))}
+            onClearInviteHistory={() =>
+              setInvitations((prev) =>
+                prev.filter((inv) => inv.status === "pending" || inv.invitedBy !== currentUserId),
+              )
+            }
+          />
+        );
+      default:
+        return (
+          <MyTasks
+            projects={userProjects}
+            currentUserId={currentUserId}
+            onToggleTaskComplete={boardActions.toggleTaskComplete}
+            onOpenTask={openTask}
+          />
+        );
     }
-
-    if (currentTab === "Мой профиль") {
-      return (
-        <MyProfile
-          userId={currentUserId}
-          onLogout={handleLogout}
-          onProfileUpdate={setCurrentUser}
-        />
-      );
-    }
-
-    if (currentTab === "Мои задачи") {
-      return (
-        <MyTasks
-          projects={projects}
-          currentUserId={currentUserId}
-          onToggleTaskComplete={toggleTaskComplete}
-          onOpenTask={(projectId, taskId) => {
-            setOpenedFromMyTasks(true);
-            setInitialActiveTaskId(taskId);
-            openProject(projectId);
-          }}
-        />
-      );
-    }
-
-    if (currentTab === "Мессенджер") {
-      return (
-        <Messenger
-          chats={chats}
-          setChats={setChats}
-          projects={projects}
-          currentUserId={currentUserId}
-          onAddComment={addComment}
-          openProject={openProject}
-        />
-      );
-    }
-
-    if (currentTab === "Приглашения") {
-      return (
-        <Invite
-          currentUserId={currentUserId}
-          projects={projects}
-          receivedInvites={receivedInvites}
-          sentInvites={sentInvites}
-          onJoinProjectById={handleJoinProjectById}
-          onSendInvite={handleSendInvite}
-          onAcceptInvite={handleAcceptInvite}
-          onDeclineInvite={handleDeclineInvite}
-          onCancelInvite={handleCancelInvite}
-          onClearInviteHistory={handleClearInviteHistory}
-        />
-      );
-    }
-
-    return <MyTasks projects={projects} currentUserId={currentUserId} />;
   };
 
-  // 🔒 Auth Guard: render login screen if user is not authenticated
   if (!currentUser) {
-    return <Auth onLoginSuccess={handleLoginSuccess} />;
+    return (
+      <>
+        <Auth onLoginSuccess={handleLoginSuccess} />
+        <Toaster />
+      </>
+    );
   }
 
   return (
-    <div className="app-container">
+    <div className="app-shell">
       <Sidebar
-        isOpen={isSidebarOpen}
-        toggle={() => setIsSidebarOpen(!isSidebarOpen)}
+        collapsed={isSidebarCollapsed}
+        onToggle={() => setIsSidebarCollapsed((v) => !v)}
         currentTab={currentTab}
-        setCurrentTab={setCurrentTab}
-        projects={projects}
-        currentUserId={currentUserId}
-        openProject={openProject}
+        onNavigate={setCurrentTab}
+        projects={userProjects}
+        onOpenProject={openProject}
+        currentUser={currentUser}
+        pendingInvites={receivedInvites.length}
       />
-      <main className="main-wrapper">
-        <header className="header">
-          <div
-            className="logo-text"
-            style={{
-              color: "var(--text-color)",
-              display: "flex",
-              alignItems: "center",
-              gap: "10px",
-            }}
-          >
-            {currentTab.startsWith("project-") && selectedProject ? (
+      <main className="app-main">
+        <header className="app-header">
+          <div className="crumbs">
+            {selectedProject ? (
               <>
-                <span>{selectedProject.name}</span>
-                <span
-                  style={{
-                    fontSize: "12px",
-                    color: "var(--nav-text-inactive)",
-                    backgroundColor: "var(--hover-color)",
-                    padding: "2px 8px",
-                    borderRadius: "4px",
-                    border: "1px solid var(--border-color)",
-                    fontFamily: "monospace",
-                  }}
-                >
-                  ID: {selectedProject.id}
-                </span>
+                <button className="crumb-link" onClick={() => setCurrentTab("projects")}>
+                  Проекты
+                </button>
+                <Icon name="chevronRight" size={14} className="crumb-sep" />
+                <span className="crumb-current">{selectedProject.name}</span>
               </>
             ) : (
-              currentTab
+              <span className="crumb-current">{PAGE_TITLES[currentTab]}</span>
             )}
           </div>
           <button
-            className="theme-btn"
-            onClick={toggleTheme}
-            aria-label="Переключить тему"
+            className="btn btn-ghost btn-icon"
+            onClick={() => setTheme((t) => (t === "dark" ? "light" : "dark"))}
+            aria-label={theme === "dark" ? "Включить светлую тему" : "Включить тёмную тему"}
+            title={theme === "dark" ? "Светлая тема" : "Тёмная тема"}
           >
-            <span className="theme-icon">{isDark ? "☀️" : "🌙"}</span>
-            <span className="theme-text">{isDark ? "Светлая" : "Темная"}</span>
+            <Icon name={theme === "dark" ? "sun" : "moon"} />
           </button>
         </header>
-        <div className="page-content">{renderPage()}</div>
+        <div className="app-content">{renderPage()}</div>
       </main>
+      <Toaster />
     </div>
   );
 }

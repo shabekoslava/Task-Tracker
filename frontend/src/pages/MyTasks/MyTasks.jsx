@@ -1,274 +1,128 @@
+import Icon from "../../components/Icon/Icon";
+import { formatDay, isUrgent, parseDay, pluralize } from "../../lib/format";
 import "./MyTasks.css";
 
-export default function MyTasks({
-  projects,
-  currentUserId,
-  onToggleTaskComplete,
-  onOpenTask,
-}) {
-  // Extract and enrich tasks assigned to the user from all active projects
-  const assignedTasks = projects.flatMap((project) =>
+const GROUPS = [
+  { id: "overdue", title: "Просрочено", tone: "danger" },
+  { id: "today", title: "Сегодня и срочные", tone: "warning" },
+  { id: "week", title: "На этой неделе", tone: "info" },
+  { id: "later", title: "Позже", tone: "neutral" },
+  { id: "none", title: "Без срока", tone: "neutral" },
+  { id: "done", title: "Выполнено", tone: "success" },
+];
+
+function groupOf(task, today, weekEnd) {
+  if (task.completed) return "done";
+  const deadline = parseDay(task.deadline);
+  if (deadline && deadline < today) return "overdue";
+  if (isUrgent(task) || (deadline && deadline.getTime() === today.getTime())) return "today";
+  if (!deadline) return "none";
+  return deadline <= weekEnd ? "week" : "later";
+}
+
+export default function MyTasks({ projects, currentUserId, onToggleTaskComplete, onOpenTask }) {
+  const tasks = projects.flatMap((project) =>
     Object.values(project.tasks || {})
       .filter((task) => task.assignedTo === currentUserId)
-      .map((task) => ({
-        ...task,
-        projectName: project.name,
-        projectId: project.id,
-      })),
+      .map((task) => ({ ...task, projectId: project.id, projectName: project.name })),
   );
 
-  // Parse dates to separate into IT standard urgency categories
-  const now = new Date();
-  now.setHours(0, 0, 0, 0); // Start of today
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const weekEnd = new Date(today);
+  weekEnd.setDate(today.getDate() + 7);
 
-  const overdue = [];
-  const urgent = [];
-  const thisWeek = [];
-  const later = [];
-  const noDeadline = [];
-  const completed = [];
+  const grouped = Object.fromEntries(GROUPS.map((g) => [g.id, []]));
+  tasks.forEach((task) => grouped[groupOf(task, today, weekEnd)].push(task));
+  Object.values(grouped).forEach((list) =>
+    list.sort((a, b) => (parseDay(a.deadline) || Infinity) - (parseDay(b.deadline) || Infinity)),
+  );
 
-  const endOfWeek = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
-  endOfWeek.setHours(23, 59, 59, 999);
-
-  assignedTasks.forEach((task) => {
-    if (task.completed) {
-      completed.push(task);
-      return;
-    }
-
-    if (!task.deadline) {
-      if (task.priority === "critical" || task.priority === "high") {
-        urgent.push(task);
-      } else {
-        noDeadline.push(task);
-      }
-      return;
-    }
-
-    const deadlineDate = new Date(task.deadline);
-    deadlineDate.setHours(0, 0, 0, 0);
-
-    if (deadlineDate < now) {
-      overdue.push(task);
-    } else if (
-      deadlineDate.getTime() === now.getTime() ||
-      task.priority === "critical" ||
-      task.priority === "high"
-    ) {
-      urgent.push(task);
-    } else if (deadlineDate <= endOfWeek) {
-      thisWeek.push(task);
-    } else {
-      later.push(task);
-    }
-  });
-
-  // Groups config to render cleanly
-  const groups = [
-    {
-      id: "overdue",
-      title: "Просрочено",
-      icon: "🔥",
-      tasks: overdue,
-      className: "group-overdue",
-    },
-    {
-      id: "urgent",
-      title: "Срочно / Сегодня",
-      icon: "⚡",
-      tasks: urgent,
-      className: "group-urgent",
-    },
-    {
-      id: "thisWeek",
-      title: "На этой неделе",
-      icon: "📅",
-      tasks: thisWeek,
-      className: "group-thisweek",
-    },
-    {
-      id: "later",
-      title: "Позже",
-      icon: "🧘",
-      tasks: later,
-      className: "group-later",
-    },
-    {
-      id: "noDeadline",
-      title: "Без дедлайна",
-      icon: "⚪",
-      tasks: noDeadline,
-      className: "group-nodeadline",
-    },
-    {
-      id: "completed",
-      title: "Выполнено",
-      icon: "✅",
-      tasks: completed,
-      className: "group-completed",
-    },
-  ];
-
-  const totalActiveTasks = assignedTasks.filter((t) => !t.completed).length;
+  const active = tasks.length - grouped.done.length;
 
   return (
-    <div className="page-fade-in tasks-page">
-      <div className="tasks-summary">
+    <div className="page">
+      <div className="page-head">
         <div>
-          <h2>Мои задачи</h2>
-          <p>Задачи, назначенные вам.</p>
-        </div>
-        <div style={{ display: "flex", gap: 12 }}>
-          <div className="task-count urgent-badge">
-            Активных: {totalActiveTasks}
-          </div>
-          <div className="task-count">Всего: {assignedTasks.length}</div>
-        </div>
-      </div>
-
-      {assignedTasks.length === 0 ? (
-        <div className="task-card empty-state">
-          <svg
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.5"
-            className="empty-state-icon"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"
-            />
-          </svg>
-          <h3>Назначенных задач пока нет</h3>
-          <p>
-            Когда в ваших проектах появятся задачи, в которых вы указаны
-            исполнителем, они мгновенно отобразятся здесь с группировкой по
-            срокам.
+          <h1 className="page-title">Мои задачи</h1>
+          <p className="page-sub">
+            {tasks.length === 0
+              ? "Здесь появятся задачи, где вы указаны исполнителем."
+              : `${active} ${pluralize(active, ["активная", "активные", "активных"])} из ${tasks.length}`}
           </p>
         </div>
+        {grouped.overdue.length > 0 && (
+          <span className="badge badge-danger">
+            <Icon name="flame" size={13} /> {grouped.overdue.length} просрочено
+          </span>
+        )}
+      </div>
+
+      {tasks.length === 0 ? (
+        <div className="panel">
+          <div className="empty">
+            <Icon name="inbox" size={36} strokeWidth={1.5} />
+            <h3>Пока пусто</h3>
+            <p>Откройте проект и назначьте себя исполнителем — задача сразу окажется здесь.</p>
+          </div>
+        </div>
       ) : (
-        <div className="tasks-groups-container">
-          {groups.map(
-            (group) =>
-              group.tasks.length > 0 && (
-                <section
-                  className={`tasks-group-section ${group.className}`}
-                  key={group.id}
-                >
-                  <div className="group-header">
-                    <span className="group-icon">{group.icon}</span>
-                    <h3>{group.title}</h3>
-                    <span className="group-badge">{group.tasks.length}</span>
-                  </div>
+        <div className="task-groups">
+          {GROUPS.filter((g) => grouped[g.id].length > 0).map((group) => (
+            <section className={`task-group tone-${group.tone}`} key={group.id}>
+              <header className="task-group-head">
+                <span className="task-group-dot" />
+                <h2>{group.title}</h2>
+                <span className="task-group-count">{grouped[group.id].length}</span>
+              </header>
 
-                  <div className="task-grid">
-                    {group.tasks.map((task) => (
-                      <article
-                        className={`task-card clickable ${task.completed ? "completed" : ""}`}
-                        key={task.id}
-                        onClick={() =>
-                          onOpenTask && onOpenTask(task.projectId, task.id)
-                        }
-                        style={{
-                          cursor: "pointer",
-                          transition: "transform 0.2s, box-shadow 0.2s",
-                        }}
-                      >
-                        <div className="task-card-header">
-                          <span className="project-badge">
-                            {task.projectName}
-                          </span>
-                          {(task.priority === "Срочно" ||
-                            task.priority === "Критичный" ||
-                            task.priority === "Высокий") && (
-                            <span className="priority-badge priority-critical">
-                              🔥 Срочно
-                            </span>
-                          )}
-                        </div>
-
-                        <div
-                          style={{
-                            display: "flex",
-                            alignItems: "center",
-                            gap: "8px",
-                            marginTop: "10px",
-                            marginBottom: "8px",
-                          }}
-                        >
-                          <input
-                            type="checkbox"
-                            checked={task.completed}
-                            onChange={(e) => {
-                              e.stopPropagation();
-                              onToggleTaskComplete &&
-                                onToggleTaskComplete(task.projectId, task.id);
-                            }}
-                            onClick={(e) => e.stopPropagation()}
-                            style={{
-                              width: "16px",
-                              height: "16px",
-                              cursor: "pointer",
-                              accentColor: "var(--accent-color)",
-                            }}
-                          />
-                          <h3
-                            style={{
-                              margin: 0,
-                              textDecoration: task.completed
-                                ? "line-through"
-                                : "none",
-                              opacity: task.completed ? 0.6 : 1,
-                              fontSize: "15px",
-                              fontWeight: "600",
-                            }}
-                          >
-                            {task.title}
-                          </h3>
-                        </div>
-
-                        {task.description && (
-                          <p className="task-description">{task.description}</p>
+              <ul className="task-rows">
+                {grouped[group.id].map((task) => (
+                  <li key={task.id}>
+                    <div
+                      className={`task-row ${task.completed ? "is-done" : ""}`}
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => onOpenTask(task.projectId, task.id)}
+                      onKeyDown={(e) => e.key === "Enter" && onOpenTask(task.projectId, task.id)}
+                    >
+                      <input
+                        type="checkbox"
+                        className="checkbox"
+                        checked={!!task.completed}
+                        onClick={(e) => e.stopPropagation()}
+                        onChange={() => onToggleTaskComplete(task.projectId, task.id)}
+                        aria-label={task.completed ? "Вернуть в работу" : "Отметить выполненной"}
+                      />
+                      <div className="task-row-main">
+                        <span className="task-row-title">{task.title}</span>
+                        {task.description && <span className="task-row-desc">{task.description}</span>}
+                      </div>
+                      <div className="task-row-meta">
+                        {isUrgent(task) && !task.completed && (
+                          <span className="badge badge-danger">Срочно</span>
                         )}
-
-                        <div className="task-tags-container">
-                          {task.tags?.length > 0 && (
-                            <div className="task-tags">
-                              {task.tags.map((tag) => (
-                                <span className="tag-pill" key={tag}>
-                                  {tag}
-                                </span>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-
-                        <div className="task-footer">
-                          <div className="task-meta">
-                            {task.deadline && (
-                              <span
-                                className={`due-date-meta ${group.id === "overdue" ? "text-danger" : ""}`}
-                              >
-                                📅 До: {task.deadline}
-                              </span>
-                            )}
-                            {task.estimate && (
-                              <span>⏱ Оценка: {task.estimate}</span>
-                            )}
-                          </div>
-                          <span className="comments-count-badge">
-                            💬 {task.comments?.length || 0}
+                        {task.tags?.slice(0, 2).map((tag) => (
+                          <span className="tag" key={tag}>{tag}</span>
+                        ))}
+                        {task.comments?.length > 0 && (
+                          <span className="meta">
+                            <Icon name="chat" size={14} /> {task.comments.length}
                           </span>
-                        </div>
-                      </article>
-                    ))}
-                  </div>
-                </section>
-              ),
-          )}
+                        )}
+                        {task.deadline && (
+                          <span className={`meta ${group.id === "overdue" ? "meta-danger" : ""}`}>
+                            <Icon name="calendar" size={14} /> {formatDay(task.deadline)}
+                          </span>
+                        )}
+                        <span className="task-row-project">{task.projectName}</span>
+                      </div>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ))}
         </div>
       )}
     </div>

@@ -3,13 +3,15 @@
 # 🔑 Auth & User Service — JWT + bcrypt
 # =============================================================================
 import os
-import traceback
+import re
+import time
+import secrets
+import asyncio
 from datetime import datetime, timedelta
 from typing import Optional
 
 from fastapi import FastAPI, Body, HTTPException, Depends, Header
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import databases
 import bcrypt
 from jose import jwt, JWTError
@@ -19,16 +21,17 @@ from jose import jwt, JWTError
 # =============================================================================
 DATABASE_URL = os.getenv(
     "DATABASE_URL",
-    "postgresql+asyncpg://postgres:Slava2005@localhost:5432/task_tracker_bd"
+    "postgresql+asyncpg://postgres:postgres@localhost:5432/task_tracker_bd"
 )
 
 JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "dev-secret-key-CHANGE-IN-PROD")
 JWT_ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
 JWT_ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("JWT_ACCESS_TOKEN_EXPIRE_MINUTES", "60"))
 PASSWORD_PEPPER = os.getenv("PASSWORD_PEPPER", "")
+# bcrypt учитывает только первые 72 байта и в новых версиях падает на более длинных
+BCRYPT_MAX_BYTES = 72
 
 database = databases.Database(DATABASE_URL)
-security = HTTPBearer(auto_error=False)
 
 app = FastAPI(title="Auth & User Service")
 
@@ -48,7 +51,7 @@ def hash_password(plain_password: str) -> str:
     Дополнительно добавляем pepper из переменных окружения."""
     peppered = plain_password + PASSWORD_PEPPER
     salt = bcrypt.gensalt(rounds=12)
-    hashed = bcrypt.hashpw(peppered.encode("utf-8"), salt)
+    hashed = bcrypt.hashpw(peppered.encode("utf-8")[:BCRYPT_MAX_BYTES], salt)
     return hashed.decode("utf-8")
 
 
@@ -56,7 +59,7 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     """Проверяем пароль: добавляем pepper и сверяем с bcrypt хешем."""
     peppered = plain_password + PASSWORD_PEPPER
     try:
-        return bcrypt.checkpw(peppered.encode("utf-8"), hashed_password.encode("utf-8"))
+        return bcrypt.checkpw(peppered.encode("utf-8")[:BCRYPT_MAX_BYTES], hashed_password.encode("utf-8"))
     except Exception:
         return False
 
@@ -112,6 +115,54 @@ async def get_current_user(authorization: Optional[str] = Header(None)) -> Optio
     return {"user_id": user["user_id"], "user_name": user["user_name"], "user_email": user["user_email"]}
 
 
+async def require_user(current_user: Optional[dict] = Depends(get_current_user)) -> dict:
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Требуется авторизация")
+    return current_user
+
+
+# =============================================================================
+# 📧 Коды подтверждения (регистрация и восстановление пароля)
+# =============================================================================
+# Код генерирует и проверяет только сервер. Хранится в памяти процесса —
+# для одного инстанса auth-service этого достаточно.
+CODE_TTL_SEC = 10 * 60
+CODE_MAX_ATTEMPTS = 5
+CODE_PURPOSES = {"register", "reset"}
+_pending_codes: dict = {}  # (email, purpose) -> {"code", "expires", "attempts"}
+
+
+def issue_code(email: str, purpose: str) -> str:
+    code = f"{secrets.randbelow(1_000_000):06d}"
+    _pending_codes[(email.lower(), purpose)] = {
+        "code": code, "expires": time.monotonic() + CODE_TTL_SEC, "attempts": 0,
+    }
+    return code
+
+
+def check_code(email: str, purpose: str, code: str, consume: bool) -> bool:
+    key = (email.lower(), purpose)
+    entry = _pending_codes.get(key)
+    if not entry or time.monotonic() > entry["expires"]:
+        _pending_codes.pop(key, None)
+        return False
+    if not secrets.compare_digest(entry["code"], str(code or "").strip()):
+        entry["attempts"] += 1
+        if entry["attempts"] >= CODE_MAX_ATTEMPTS:
+            _pending_codes.pop(key, None)
+        return False
+    if consume:
+        _pending_codes.pop(key, None)
+    return True
+
+
+async def find_user_by_email(email: str):
+    return await database.fetch_one(
+        "SELECT user_id, user_name, user_email, password_hash FROM user_ WHERE LOWER(user_email) = :email",
+        {"email": email.lower()}
+    )
+
+
 # =============================================================================
 # События запуска/останова
 # =============================================================================
@@ -143,13 +194,11 @@ async def register_user(data: dict = Body(...)):
     if not name or not email or not password:
         raise HTTPException(status_code=400, detail="Имя, email и пароль обязательны")
 
-    # Проверяем, что email не занят
-    existing = await database.fetch_one(
-        "SELECT user_id FROM user_ WHERE LOWER(user_email) = :email",
-        {"email": email.lower()}
-    )
-    if existing:
+    if await find_user_by_email(email):
         raise HTTPException(status_code=409, detail="Пользователь с таким email уже существует")
+
+    if not check_code(email, "register", data.get("code"), consume=True):
+        raise HTTPException(status_code=400, detail="Неверный или просроченный код подтверждения")
 
     # Генерируем ID если не передан
     if not user_id:
@@ -163,7 +212,7 @@ async def register_user(data: dict = Body(...)):
                 break
 
     # 🔐 Хешируем пароль — в БД попадает ТОЛЬКО хеш, НИКОГДА открытый пароль
-    password_hash = hash_password(password)
+    password_hash = await asyncio.to_thread(hash_password, password)
 
     await database.execute(
         """INSERT INTO user_ (user_id, user_name, user_email, password_hash)
@@ -216,7 +265,7 @@ async def login_user(data: dict = Body(...)):
         raise HTTPException(status_code=401, detail="Неверный логин или пароль")
 
     # 🔐 Проверяем пароль через bcrypt (НЕ сравниваем строки!)
-    if not verify_password(password, user["password_hash"]):
+    if not await asyncio.to_thread(verify_password, password, user["password_hash"]):
         raise HTTPException(status_code=401, detail="Неверный логин или пароль")
 
     # 🎫 Генерируем JWT токен
@@ -260,109 +309,131 @@ async def get_me(current_user: Optional[dict] = Depends(get_current_user)):
 # =============================================================================
 # 👤 API: Профиль пользователя
 # =============================================================================
+EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]{2,}$")
+
+
 @app.get("/api/user/profile")
-async def get_user_profile(userId: str = None, current_user: Optional[dict] = Depends(get_current_user)):
-    # Если есть JWT — используем данные из токена
-    target_id = userId
-    if not target_id and current_user:
-        target_id = current_user["user_id"]
-    
-    if target_id:
-        user = await database.fetch_one(
-            "SELECT user_name, user_email FROM user_ WHERE UPPER(user_id) = :uid",
-            {"uid": target_id.upper()}
-        )
-        if user:
-            return {"displayName": user["user_name"], "email": user["user_email"]}
-    
-    first = await database.fetch_one("SELECT user_name, user_email FROM user_ LIMIT 1")
-    if first:
-        return {"displayName": first["user_name"], "email": first["user_email"]}
-    return {"displayName": "Алексей Смирнов", "email": "alex@example.com"}
+async def get_user_profile(userId: Optional[str] = None, current_user: Optional[dict] = Depends(get_current_user)):
+    target_id = userId or (current_user["user_id"] if current_user else None)
+    if not target_id:
+        raise HTTPException(status_code=401, detail="Требуется авторизация")
+
+    user = await database.fetch_one(
+        "SELECT user_id, user_name, user_email, avatar FROM user_ WHERE UPPER(user_id) = :uid",
+        {"uid": target_id.upper()}
+    )
+    if not user:
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
+    return {"id": user["user_id"], "displayName": user["user_name"],
+            "email": user["user_email"], "avatar": user["avatar"]}
 
 
 @app.post("/api/user/profile")
-async def update_user_profile(data: dict = Body(...)):
-    user_id = data.get("userId", "shaber")
-    display_name = data["displayName"]
-    email = data["email"]
+async def update_user_profile(data: dict = Body(...), current_user: dict = Depends(require_user)):
+    """Обновляет имя, email и/или аватар текущего пользователя (из JWT)."""
+    user_id = current_user["user_id"]
+    updates = {}
 
-    existing = await database.fetch_one(
-        "SELECT user_id FROM user_ WHERE UPPER(user_id) = :uid", {"uid": user_id.upper()}
+    if "displayName" in data:
+        name = (data.get("displayName") or "").strip()
+        if not name:
+            raise HTTPException(status_code=400, detail="Имя не может быть пустым")
+        updates["user_name"] = name
+
+    if "email" in data:
+        email = (data.get("email") or "").strip()
+        if not EMAIL_RE.match(email):
+            raise HTTPException(status_code=400, detail="Некорректный email")
+        other = await find_user_by_email(email)
+        if other and other["user_id"] != user_id:
+            raise HTTPException(status_code=409, detail="Этот email уже занят")
+        updates["user_email"] = email
+
+    if "avatar" in data:
+        updates["avatar"] = data.get("avatar") or None
+
+    if updates:
+        assignments = ", ".join(f"{col} = :{col}" for col in updates)
+        await database.execute(
+            f"UPDATE user_ SET {assignments} WHERE user_id = :uid", {**updates, "uid": user_id}
+        )
+
+    user = await database.fetch_one(
+        "SELECT user_id, user_name, user_email, avatar FROM user_ WHERE user_id = :uid", {"uid": user_id}
     )
-    if existing:
-        matched_id = existing["user_id"]
-        await database.execute(
-            "UPDATE user_ SET user_name = :name, user_email = :email WHERE user_id = :uid",
-            {"name": display_name, "email": email, "uid": matched_id}
-        )
-    else:
-        password_hash = hash_password("temp_password")
-        await database.execute(
-            """INSERT INTO user_ (user_id, user_name, user_email, password_hash)
-               VALUES (:uid, :name, :email, :pwd)
-               ON CONFLICT (user_id) DO UPDATE SET
-                   user_name = EXCLUDED.user_name,
-                   user_email = EXCLUDED.user_email""",
-            {"uid": user_id, "name": display_name, "email": email, "pwd": password_hash}
-        )
-    return {"status": "success", "message": "Profile updated successfully"}
+    return {"status": "success",
+            "user": {"id": user["user_id"], "name": user["user_name"],
+                     "email": user["user_email"], "avatar": user["avatar"]}}
 
 
 # =============================================================================
 # 🔄 API: Смена пароля (POST /api/auth/change-password)
 # =============================================================================
 @app.post("/api/auth/change-password")
-async def change_password(data: dict = Body(...)):
-    """Смена пароля: хешируем новый пароль и сохраняем в БД."""
-    user_id = data.get("userId", "").strip()
+async def change_password(data: dict = Body(...), current_user: Optional[dict] = Depends(get_current_user)):
+    """Два сценария:
+    - пользователь вошёл (есть JWT) — нужен текущий пароль;
+    - восстановление — нужен email и код, выданный /api/auth/send-code (purpose=reset)."""
     new_password = data.get("newPassword", "")
-    email = data.get("email", "").strip()
+    if len(new_password) < 6:
+        raise HTTPException(status_code=400, detail="Пароль должен быть не короче 6 символов")
 
-    if not new_password:
-        raise HTTPException(status_code=400, detail="Новый пароль обязателен")
-
-    # Находим пользователя
-    user = None
-    if user_id:
+    if current_user:
         user = await database.fetch_one(
-            "SELECT user_id FROM user_ WHERE UPPER(user_id) = :uid",
-            {"uid": user_id.upper()}
+            "SELECT user_id, password_hash FROM user_ WHERE user_id = :uid",
+            {"uid": current_user["user_id"]}
         )
-    elif email:
-        user = await database.fetch_one(
-            "SELECT user_id FROM user_ WHERE LOWER(user_email) = :email",
-            {"email": email.lower()}
-        )
+        ok = await asyncio.to_thread(verify_password, data.get("currentPassword", ""), user["password_hash"])
+        if not ok:
+            raise HTTPException(status_code=400, detail="Текущий пароль введён неверно")
+    else:
+        email = (data.get("email") or "").strip()
+        user = await find_user_by_email(email) if email else None
+        if not user or not check_code(email, "reset", data.get("code"), consume=True):
+            raise HTTPException(status_code=400, detail="Неверный или просроченный код подтверждения")
 
-    if not user:
-        raise HTTPException(status_code=404, detail="Пользователь не найден")
-
-    # 🔐 Хешируем новый пароль
-    new_hash = hash_password(new_password)
+    new_hash = await asyncio.to_thread(hash_password, new_password)
     await database.execute(
         "UPDATE user_ SET password_hash = :pwd WHERE user_id = :uid",
         {"pwd": new_hash, "uid": user["user_id"]}
     )
 
-    print(f"🔑 Пароль изменен для пользователя: {user['user_id']}")
+    print(f"🔑 Пароль изменен для пользователя: {user['user_id']}", flush=True)
     return {"status": "success", "message": "Пароль успешно изменен"}
 
 
 # =============================================================================
-# 📧 API: Отправка кода подтверждения
+# 📧 API: Коды подтверждения
 # =============================================================================
 @app.post("/api/auth/send-code")
 async def send_verification_code(data: dict = Body(...)):
-    email = data.get("email")
-    code = data.get("code")
-    name = data.get("name", "Пользователь")
-    if not email or not code:
-        return {"status": "error", "message": "Email and code are required"}
+    """Генерирует код и «отправляет» его. Почтового сервера нет,
+    поэтому код печатается в лог auth-service."""
+    email = (data.get("email") or "").strip()
+    purpose = data.get("purpose", "register")
+    if not EMAIL_RE.match(email) or purpose not in CODE_PURPOSES:
+        raise HTTPException(status_code=400, detail="Некорректный запрос")
 
-    print("\n" + "═"*60)
-    print(f"📧 [EMAIL VERIFICATION CODE] ДЛЯ: {name} ({email})")
-    print("═"*60)
-    print(f"👉   ВАШ КОД ПОДТВЕРЖДЕНИЯ:  {code}  👈")
-    print("═"*60 + "\n")
-    return {"status": "success", "message": f"Verification code sent to {email}"}
+    user = await find_user_by_email(email)
+    if purpose == "register" and user:
+        raise HTTPException(status_code=409, detail="Пользователь с таким email уже существует")
+
+    # Для восстановления не раскрываем, существует ли аккаунт: ответ одинаковый.
+    if purpose == "register" or user:
+        code = issue_code(email, purpose)
+        print("═" * 60, flush=True)
+        print(f"📧 [{purpose.upper()} CODE] для {email}", flush=True)
+        print(f"👉   КОД ПОДТВЕРЖДЕНИЯ:  {code}", flush=True)
+        print("═" * 60, flush=True)
+
+    return {"status": "success", "message": f"Код отправлен на {email}"}
+
+
+@app.post("/api/auth/verify-code")
+async def verify_code(data: dict = Body(...)):
+    """Проверка кода без его использования (шаг 2 восстановления пароля)."""
+    email = (data.get("email") or "").strip()
+    purpose = data.get("purpose", "reset")
+    if not check_code(email, purpose, data.get("code"), consume=False):
+        raise HTTPException(status_code=400, detail="Неверный или просроченный код подтверждения")
+    return {"status": "success"}

@@ -2,7 +2,6 @@
 import os
 import asyncio
 import json
-import traceback
 from typing import List
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -44,10 +43,10 @@ manager = ConnectionManager()
 async def websocket_endpoint(websocket: WebSocket):
     await manager.connect(websocket)
     try:
+        # Сокет работает только на отправку событий из Kafka. Сообщения клиентов
+        # не пересылаем: раньше любой клиент мог разослать всем произвольное «состояние».
         while True:
-            data = await websocket.receive_json()
-            # Рассылаем локально
-            await manager.broadcast(data, exclude=websocket)
+            await websocket.receive_text()
     except WebSocketDisconnect:
         manager.disconnect(websocket)
     except Exception as e:
@@ -112,7 +111,6 @@ async def startup():
 
 @app.on_event("shutdown")
 async def shutdown():
-    global consumer_task
     if consumer_task:
         consumer_task.cancel()
         print("🛑 Фоновый Kafka Consumer остановлен.")

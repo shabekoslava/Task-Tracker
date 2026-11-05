@@ -1,96 +1,69 @@
-/* src/App.css */
-
-/* Обертка всего приложения */
-.app-container {
+.app-shell {
   display: flex;
-  height: 100vh; /* Изменил на 100vh, чтобы приложение занимало весь экран по высоте */
-  overflow: hidden; /* Запрещаем общий скролл страницы */
-}
-
-/* --- ПРАВАЯ ЧАСТЬ (Контент) --- */
-.main-wrapper {
-  flex: 1; /* Занимает всё оставшееся место справа от сайдбара */
-  display: flex;
-  flex-direction: column;
+  height: 100vh;
   overflow: hidden;
 }
 
-.header {
-  height: var(
-    --header-height,
-    56px
-  ); /* Добавил фоллбэк 56px на случай отсутствия переменной */
-  background-color: var(--bg-surface);
-  border-bottom: 1px solid var(--border-color);
+.app-main {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.app-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 24px;
+  flex-shrink: 0;
+  height: var(--header-h);
+  padding: 0 24px 0 28px;
+  border-bottom: 1px solid var(--line);
 }
 
-.page-content {
-  flex: 1;
-  padding: 24px;
-  overflow-y: auto; /* Скролл только внутри этой области, если задач много */
-}
-
-/* Theme toggle button: match sidebar buttons color and size */
-.theme-btn {
-  display: inline-flex;
+.crumbs {
+  display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 10px 16px; /* same vertical/horizontal rhythm as .nav-item */
-  background: none;
-  border: none;
-  border-radius: 8px;
-  cursor: pointer;
-  color: var(--nav-text-inactive);
+  gap: 6px;
+  min-width: 0;
   font-size: 14px;
-  transition:
-    background-color 0.2s ease,
-    color 0.2s ease;
-  min-width: 120px; /* фиксированная минимальная ширина, не зависит от темы */
-}
-/* Анимация переключения страниц */
-.page-fade-in {
-  animation: fadeIn 0.3s ease-in;
 }
 
-@keyframes fadeIn {
-  from {
-    opacity: 0;
-    transform: translateY(10px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-.theme-btn:hover {
-  background-color: var(--hover-color);
-  color: var(--nav-text-active);
+.crumb-link {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--text-2);
 }
 
-.theme-btn .theme-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: var(--icon-size);
-  height: var(--icon-size);
-  font-size: calc(var(--icon-size));
-  line-height: 1;
+.crumb-link:hover {
+  color: var(--text);
 }
 
-/* На мобильных экранах скрываем текст и оставляем только значок */
-@media (max-width: 600px) {
-  .theme-btn {
-    padding: 8px; /* квадратный размер */
-    width: 40px;
-    min-width: 40px;
-    gap: 0;
-    justify-content: center;
+.crumb-sep {
+  color: var(--text-3);
+}
+
+.crumb-current {
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app-content {
+  flex: 1;
+  min-height: 0;
+  padding: 28px;
+  overflow-y: auto;
+}
+
+@media (max-width: 700px) {
+  .app-header {
+    padding: 0 12px 0 16px;
   }
-  .theme-btn .theme-text {
-    display: none;
+
+  .app-content {
+    padding: 16px;
   }
 }

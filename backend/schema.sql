@@ -76,6 +76,7 @@ CREATE TABLE IF NOT EXISTS task (
     priority VARCHAR(20) DEFAULT 'Средний',
     completed BOOLEAN DEFAULT FALSE,
     task_color VARCHAR(7),
+    position INT NOT NULL DEFAULT 0,
     CONSTRAINT fk_task_project FOREIGN KEY (project_id)
         REFERENCES project(project_id)
         ON DELETE CASCADE,

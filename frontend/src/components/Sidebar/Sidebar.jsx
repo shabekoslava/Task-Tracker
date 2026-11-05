@@ -1,113 +1,106 @@
-// src/components/Sidebar.jsx
-import "./Sidebar.css"; // Подключаем стили
-import {
-  TasksIcon,
-  ProjectsIcon,
-  MessengerIcon,
-  OpenIcon,
-  CloseIcon,
-  AccountIcon,
-  InviteIcon,
-} from "./IconsSidebar";
+import Icon from "../Icon/Icon";
+import Avatar from "../Avatar/Avatar";
+import "./Sidebar.css";
+
+const NAV = [
+  { id: "tasks", label: "Мои задачи", icon: "tasks" },
+  { id: "projects", label: "Проекты", icon: "folder" },
+  { id: "messenger", label: "Мессенджер", icon: "chat" },
+  { id: "invites", label: "Приглашения", icon: "mail" },
+];
+
+export function BrandMark({ size = 30 }) {
+  return (
+    <span className="brand-mark" style={{ width: size, height: size }}>
+      <svg viewBox="0 0 24 24" width={size * 0.6} height={size * 0.6} fill="none" aria-hidden="true">
+        <rect x="3" y="4" width="5" height="16" rx="1.5" fill="currentColor" />
+        <rect x="10" y="4" width="5" height="10" rx="1.5" fill="currentColor" opacity="0.7" />
+        <rect x="17" y="4" width="4" height="6" rx="1.5" fill="currentColor" opacity="0.45" />
+      </svg>
+    </span>
+  );
+}
 
 export default function Sidebar({
-  isOpen,
-  toggle,
+  collapsed,
+  onToggle,
   currentTab,
-  setCurrentTab,
+  onNavigate,
   projects,
-  currentUserId,
-  openProject,
+  onOpenProject,
+  currentUser,
+  pendingInvites,
 }) {
-  const menuItems = [
-    { id: "Мои задачи", name: "Мои задачи", Icon: TasksIcon },
-    { id: "Мессенджер", name: "Мессенджер", Icon: MessengerIcon },
-    { id: "Приглашения", name: "Приглашения", Icon: InviteIcon },
-    { id: "Мои проекты", name: "Мои проекты", Icon: ProjectsIcon },
-  ];
+  const item = (active, label, icon, onClick, extra) => (
+    <button
+      className={`nav-item ${active ? "active" : ""}`}
+      onClick={onClick}
+      title={collapsed ? label : undefined}
+      aria-label={label}
+    >
+      {icon}
+      {!collapsed && <span className="nav-label">{label}</span>}
+      {extra}
+    </button>
+  );
 
   return (
-    <aside className={`sidebar ${isOpen ? "open" : "closed"}`}>
-      {/* --- ВЕРХНЯЯ ЧАСТЬ (Header / Profile) --- */}
-      <div className="sidebar-header-wrapper">
-        {isOpen ? (
-          <div className="sidebar-header open">
-            <button
-              className={`nav-item profile-btn ${currentTab === "Мой профиль" ? "active" : ""}`}
-              onClick={() => setCurrentTab("Мой профиль")}
-            >
-              <AccountIcon className="nav-icon-svg" />
-              <span className="nav-text">Мой профиль</span>
-            </button>
-            <button className="collapse-btn" onClick={toggle}>
-              <CloseIcon className="nav-icon-svg" />
-            </button>
-          </div>
-        ) : (
-          <div className="sidebar-header closed">
-            <button className="collapse-btn" onClick={toggle}>
-              <OpenIcon className="nav-icon-svg" />
-            </button>
-            <hr className="sidebar-divider" />
-            <button
-              className={`nav-item ${currentTab === "Мой профиль" ? "active" : ""}`}
-              onClick={() => setCurrentTab("Мой профиль")}
-            >
-              <AccountIcon className="nav-icon-svg" />
-            </button>
+    <aside className={`sidebar ${collapsed ? "collapsed" : ""}`}>
+      <div className="sidebar-top">
+        {!collapsed && (
+          <div className="brand">
+            <BrandMark />
+            <span className="brand-name">Task Tracker</span>
           </div>
         )}
+        <button
+          className="btn btn-ghost btn-icon btn-sm"
+          onClick={onToggle}
+          aria-label={collapsed ? "Развернуть меню" : "Свернуть меню"}
+        >
+          <Icon name="sidebar" size={17} />
+        </button>
       </div>
 
-      <hr className="sidebar-divider" />
+      <nav className="sidebar-nav">
+        {NAV.map(({ id, label, icon }) =>
+          item(
+            currentTab === id,
+            label,
+            <Icon name={icon} />,
+            () => onNavigate(id),
+            id === "invites" && pendingInvites > 0 && (
+              <span className="nav-count">{pendingInvites}</span>
+            ),
+          ),
+        )}
 
-      {/* --- ОСНОВНОЕ МЕНЮ --- */}
-      <nav className="nav-menu">
-        {menuItems.map((item) => (
-          <button
-            key={item.id}
-            className={`nav-item ${currentTab === item.id ? "active" : ""}`}
-            onClick={() => setCurrentTab(item.id)}
-          >
-            <item.Icon className="nav-icon-svg" />
-            {isOpen && <span className="nav-text">{item.name}</span>}
-          </button>
-        ))}
-
-        {projects && projects.length > 0 && (
+        {projects.length > 0 && (
           <>
-            {(() => {
-              const userProjects = projects.filter((project) =>
-                Array.isArray(project.members) && project.members.some((m) => m.id === currentUserId),
-              );
-              if (userProjects.length === 0) return null;
-              return (
-                <>
-                  <hr className="sidebar-divider" />
-                  {userProjects.map((project) => (
-                    <button
-                      key={project.id}
-                      className={`nav-item ${currentTab === `project-${project.id}` ? "active" : ""}`}
-                      onClick={() => {
-                        if (openProject) {
-                          openProject(project.id, "board");
-                        } else {
-                          setCurrentTab(`project-${project.id}`);
-                        }
-                      }}
-                    >
-                      <ProjectsIcon className="nav-icon-svg" />
-                      {isOpen && (
-                        <span className="nav-text">{project.name}</span>
-                      )}
-                    </button>
-                  ))}
-                </>
-              );
-            })()}
+            {!collapsed && <div className="nav-section">Мои проекты</div>}
+            {collapsed && <hr className="divider nav-divider" />}
+            <div className="nav-projects">
+              {projects.map((project) =>
+                item(
+                  currentTab === `project-${project.id}`,
+                  project.name,
+                  <span className="project-dot">{project.name.charAt(0).toUpperCase()}</span>,
+                  () => onOpenProject(project.id, "board"),
+                ),
+              )}
+            </div>
           </>
         )}
       </nav>
+
+      <div className="sidebar-bottom">
+        {item(
+          currentTab === "profile",
+          currentUser.name,
+          <Avatar name={currentUser.name} src={currentUser.avatar} size={26} />,
+          () => onNavigate("profile"),
+        )}
+      </div>
     </aside>
   );
 }

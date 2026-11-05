@@ -1,10 +1,20 @@
-// src/pages/invite/Invite.jsx
 import { useState } from "react";
+import Icon from "../../components/Icon/Icon";
+import Avatar from "../../components/Avatar/Avatar";
+import { formatDay, roleLabel } from "../../lib/format";
+import { toast } from "../../lib/toast";
 import "./Invite.css";
+
+const STATUS = {
+  pending: ["Ожидает", ""],
+  accepted: ["Принято", "badge-success"],
+  declined: ["Отклонено", "badge-danger"],
+};
 
 export default function Invite({
   currentUserId,
   projects,
+  users,
   receivedInvites,
   sentInvites,
   onJoinProjectById,
@@ -12,125 +22,152 @@ export default function Invite({
   onAcceptInvite,
   onDeclineInvite,
   onCancelInvite,
-  onClearInviteHistory
+  onClearInviteHistory,
 }) {
-  const [projectIdInput, setProjectIdInput] = useState("");
-  const [joinError, setJoinError] = useState("");
-  const [joinSuccess, setJoinSuccess] = useState("");
+  const [joinId, setJoinId] = useState("");
+  const [projectId, setProjectId] = useState("");
+  const [userId, setUserId] = useState("");
+  const [role, setRole] = useState("member");
 
-  const [inviteUserId, setInviteUserId] = useState("");
-  const [selectedProjectId, setSelectedProjectId] = useState("");
-  const [inviteError, setInviteError] = useState("");
-  const [inviteSuccess, setInviteSuccess] = useState("");
-  const [inviteRole, setInviteRole] = useState("member");
-
-  // Get projects where current user is admin
+  const userName = (id) => users.find((u) => u.id === id)?.name || id;
+  const userAvatar = (id) => users.find((u) => u.id === id)?.avatar;
   const adminProjects = projects.filter((p) =>
-    p.members.some((m) => m.id === currentUserId && m.role === "admin")
+    p.members.some((m) => m.id === currentUserId && m.role === "admin"),
   );
+  const hasHistory = sentInvites.some((inv) => inv.status !== "pending");
 
-  const handleJoinByCode = (e) => {
+  const join = (e) => {
     e.preventDefault();
-    setJoinError("");
-    setJoinSuccess("");
-
-    const code = projectIdInput.trim();
-    if (!code) {
-      setJoinError("Пожалуйста, введите ID проекта");
-      return;
-    }
-
-    const success = onJoinProjectById(code);
-    if (success) {
-      setJoinSuccess("Вы успешно вступили в проект!");
-      setProjectIdInput("");
+    if (onJoinProjectById(joinId.trim())) {
+      toast("Вы присоединились к проекту");
+      setJoinId("");
     } else {
-      setJoinError("Проект с таким ID не найден или вы уже состоите в нем");
+      toast("Проект не найден или вы уже в нём состоите", "error");
     }
   };
 
-  const handleSendInvite = (e) => {
+  const invite = (e) => {
     e.preventDefault();
-    setInviteError("");
-    setInviteSuccess("");
-
-    const targetUserId = inviteUserId.trim();
-    const projId = selectedProjectId;
-
-    if (!targetUserId || !projId) {
-      setInviteError("Пожалуйста, заполните все поля");
-      return;
-    }
-
-    if (targetUserId.toUpperCase() === currentUserId.toUpperCase()) {
-      setInviteError("Вы не можете пригласить сами себя");
-      return;
-    }
-
-    // Call state handler in parent
-    const result = onSendInvite(projId, targetUserId, inviteRole);
-    if (result.success) {
-      setInviteSuccess(result.message);
-      setInviteUserId("");
-      setInviteRole("member");
-    } else {
-      setInviteError(result.message);
-    }
+    const result = onSendInvite(projectId, userId, role);
+    toast(result.message, result.success ? "success" : "error");
+    if (result.success) setUserId("");
   };
 
-  const copyUserId = () => {
-    navigator.clipboard.writeText(currentUserId);
-    alert(`Ваш ID (${currentUserId}) успешно скопирован в буфер обмена!`);
+  const copyMyId = () => {
+    navigator.clipboard?.writeText(currentUserId);
+    toast("ID скопирован — отправьте его коллеге");
   };
-
-  // Check if there is any history (accepted or declined) to clean
-  const hasHistory = sentInvites.some(inv => inv.status !== "pending") || receivedInvites.some(inv => inv.status !== "pending");
 
   return (
-    <div className="page-fade-in invite-page">
-      <div className="invite-header-section">
-        <h2>Приглашения</h2>
-        <p>Ваш личный ID: <span className="user-id-highlight" onClick={copyUserId} style={{ cursor: "pointer" }} title="Нажмите, чтобы скопировать">{currentUserId} 📋</span></p>
+    <div className="page">
+      <div className="page-head">
+        <div>
+          <h1 className="page-title">Приглашения</h1>
+          <p className="page-sub">Чтобы вас добавили в проект, передайте коллеге свой ID.</p>
+        </div>
+        <button className="id-chip my-id" onClick={copyMyId} title="Скопировать">
+          Мой ID: {currentUserId} <Icon name="copy" size={13} />
+        </button>
       </div>
 
-      <div className="invite-grid-layouts">
-        {/* Left Side: Join and Send Forms */}
-        <div className="invite-forms-column">
-          {/* Join Project Card */}
-          <div className="invite-card">
-            <h3>Войти в проект по ID проекта</h3>
-            
-            <form onSubmit={handleJoinByCode} className="invite-form-element">
-              <input
-                type="text"
-                value={projectIdInput}
-                onChange={(e) => setProjectIdInput(e.target.value)}
-                placeholder="Например, 17163821034"
-              />
-              <button type="submit" className="btn primary">
-                Присоединиться
-              </button>
-            </form>
-            {joinError && <div className="invite-msg error-msg">{joinError}</div>}
-            {joinSuccess && <div className="invite-msg success-msg">{joinSuccess}</div>}
-          </div>
-
-          {/* Send Invite Card */}
-          <div className="invite-card">
-            <h3>Отправить приглашение</h3>
-
-            {adminProjects.length === 0 ? (
-              <p className="no-admin-projects-warn">Вы не являетесь администратором ни одного проекта. Чтобы приглашать коллег, создайте проект во вкладке "Мои проекты".</p>
+      <div className="invite-layout">
+        <div className="invite-col">
+          <section className="panel">
+            <header className="list-head">
+              <h3 className="panel-title">Входящие</h3>
+              {receivedInvites.length > 0 && <span className="badge badge-accent">{receivedInvites.length}</span>}
+            </header>
+            {receivedInvites.length === 0 ? (
+              <p className="list-empty">Новых приглашений нет.</p>
             ) : (
-              <form onSubmit={handleSendInvite} className="invite-form-element vertical">
-                <div className="form-field-wrapper">
-                  <label>Выбрать проект</label>
+              <ul className="invite-list">
+                {receivedInvites.map((inv) => (
+                  <li className="invite-item" key={inv.id}>
+                    <Avatar name={userName(inv.invitedBy)} src={userAvatar(inv.invitedBy)} size={34} />
+                    <div className="invite-text">
+                      <span>
+                        <b>{userName(inv.invitedBy)}</b> зовёт в <b>{inv.projectName}</b>
+                      </span>
+                      <span className="invite-meta">
+                        Роль: {roleLabel(inv.role)}
+                        {inv.created_at && `, ${formatDay(inv.created_at)}`}
+                      </span>
+                    </div>
+                    <div className="invite-actions">
+                      <button className="btn btn-ghost btn-sm" onClick={() => onDeclineInvite(inv.id)}>
+                        Отклонить
+                      </button>
+                      <button className="btn btn-primary btn-sm" onClick={() => onAcceptInvite(inv.id, inv.projectId)}>
+                        Принять
+                      </button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+
+          <section className="panel">
+            <header className="list-head">
+              <h3 className="panel-title">Отправленные</h3>
+              {hasHistory && (
+                <button className="link-btn small" onClick={onClearInviteHistory}>
+                  Очистить историю
+                </button>
+              )}
+            </header>
+            {sentInvites.length === 0 ? (
+              <p className="list-empty">Вы ещё никого не приглашали.</p>
+            ) : (
+              <ul className="invite-list">
+                {sentInvites.map((inv) => {
+                  const [label, tone] = STATUS[inv.status] || STATUS.pending;
+                  return (
+                    <li className="invite-item" key={inv.id}>
+                      <Avatar name={userName(inv.invitedUser)} src={userAvatar(inv.invitedUser)} size={34} />
+                      <div className="invite-text">
+                        <span>
+                          <b>{userName(inv.invitedUser)}</b> → {inv.projectName}
+                        </span>
+                        <span className="invite-meta">Роль: {roleLabel(inv.role)}</span>
+                      </div>
+                      <span className={`badge ${tone}`}>{label}</span>
+                      <button
+                        className="btn btn-ghost btn-icon btn-sm danger-hover"
+                        onClick={() => onCancelInvite(inv.id)}
+                        aria-label={inv.status === "pending" ? "Отозвать приглашение" : "Убрать из истории"}
+                        title={inv.status === "pending" ? "Отозвать" : "Убрать из истории"}
+                      >
+                        <Icon name="close" size={14} />
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </section>
+        </div>
+
+        <div className="invite-col">
+          <form className="panel panel-pad invite-form" onSubmit={invite}>
+            <div>
+              <h3 className="panel-title">Пригласить коллегу</h3>
+              <p className="panel-sub">Доступно для проектов, где вы администратор.</p>
+            </div>
+            {adminProjects.length === 0 ? (
+              <p className="muted">Создайте проект — и сможете приглашать в него людей.</p>
+            ) : (
+              <>
+                <div className="field">
+                  <label htmlFor="inv-project">Проект</label>
                   <select
-                    value={selectedProjectId}
-                    onChange={(e) => setSelectedProjectId(e.target.value)}
+                    id="inv-project"
+                    className="select"
+                    value={projectId}
+                    onChange={(e) => setProjectId(e.target.value)}
                     required
                   >
-                    <option value="">-- Выберите проект --</option>
+                    <option value="">Выберите проект</option>
                     {adminProjects.map((p) => (
                       <option key={p.id} value={p.id}>
                         {p.name}
@@ -138,151 +175,52 @@ export default function Invite({
                     ))}
                   </select>
                 </div>
-
-                <div className="form-field-wrapper">
-                  <label>ID пользователя</label>
-                  <input
-                    type="text"
-                    value={inviteUserId}
-                    onChange={(e) => setInviteUserId(e.target.value)}
-                    placeholder="Например, INV-1234"
-                    required
-                  />
+                <div className="field-pair">
+                  <div className="field">
+                    <label htmlFor="inv-user">ID пользователя</label>
+                    <input
+                      id="inv-user"
+                      className="input"
+                      value={userId}
+                      onChange={(e) => setUserId(e.target.value)}
+                      placeholder="INV-1234"
+                      required
+                    />
+                  </div>
+                  <div className="field">
+                    <label htmlFor="inv-role">Роль</label>
+                    <select id="inv-role" className="select" value={role} onChange={(e) => setRole(e.target.value)}>
+                      <option value="member">Участник</option>
+                      <option value="viewer">Наблюдатель</option>
+                      <option value="admin">Админ</option>
+                    </select>
+                  </div>
                 </div>
-
-                <div className="form-field-wrapper">
-                  <label>Роль в проекте</label>
-                  <select
-                    value={inviteRole}
-                    onChange={(e) => setInviteRole(e.target.value)}
-                    required
-                  >
-                    <option value="member">Участник</option>
-                    <option value="viewer">Наблюдатель</option>
-                    <option value="admin">Админ</option>
-                  </select>
-                </div>
-
-                <button type="submit" className="btn primary">
+                <button className="btn btn-primary" disabled={!projectId || !userId.trim()}>
                   Отправить приглашение
                 </button>
-              </form>
+              </>
             )}
-            {inviteError && <div className="invite-msg error-msg">{inviteError}</div>}
-            {inviteSuccess && <div className="invite-msg success-msg">{inviteSuccess}</div>}
-          </div>
-        </div>
+          </form>
 
-        {/* Right Side: Incoming and Outgoing Lists */}
-        <div className="invite-lists-column">
-          {/* Incoming Card */}
-          <div className="invite-card">
-            <h3>Входящие приглашения ({receivedInvites.length})</h3>
-            
-            {receivedInvites.length === 0 ? (
-              <div className="empty-state-list-text">
-                Пока никто не присылал вам приглашений.
-              </div>
-            ) : (
-              <div className="invitations-list-wrapper">
-                {receivedInvites.map((inv) => (
-                  <div key={inv.id} className="invitation-item-card incoming">
-                    <div className="inv-details">
-                      <div className="project-title-name">
-                        {inv.projectName}{" "}
-                        <span style={{ fontSize: "11px", opacity: 0.6, fontFamily: "monospace" }}>
-                          (ID: {inv.projectId})
-                        </span>
-                      </div>
-                      <div className="inv-meta-info">
-                        Отправитель: <span className="sender-id">{inv.invitedBy}</span> | Роль: <span style={{ fontWeight: "600", color: "var(--primary-color)" }}>{inv.role === 'admin' ? 'Админ' : inv.role === 'member' ? 'Участник' : 'Наблюдатель'}</span>
-                      </div>
-                    </div>
-                    <div className="inv-actions">
-                      <button
-                        className="btn success small"
-                        onClick={() => onAcceptInvite(inv.id, inv.projectId)}
-                      >
-                        Принять
-                      </button>
-                      <button
-                        className="btn danger small"
-                        onClick={() => onDeclineInvite(inv.id)}
-                      >
-                        Отклонить
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Outgoing Card */}
-          <div className="invite-card">
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
-              <h3>Исходящие приглашения ({sentInvites.length})</h3>
-              {hasHistory && (
-                <button className="btn-link-clear" onClick={onClearInviteHistory} title="Удалить принятые и отклоненные из истории">
-                  Очистить историю
-                </button>
-              )}
+          <form className="panel panel-pad invite-form" onSubmit={join}>
+            <div>
+              <h3 className="panel-title">Вступить по ID проекта</h3>
+              <p className="panel-sub">ID есть в настройках проекта у администратора.</p>
             </div>
-
-            {sentInvites.length === 0 ? (
-              <div className="empty-state-list-text">
-                Вы пока не приглашали коллег.
-              </div>
-            ) : (
-              <div className="invitations-list-wrapper">
-                {sentInvites.map((inv) => (
-                  <div key={inv.id} className="invitation-item-card outgoing">
-                    <div className="inv-details">
-                      <div className="project-title-name">
-                        {inv.projectName}{" "}
-                        <span style={{ fontSize: "11px", opacity: 0.6, fontFamily: "monospace" }}>
-                          (ID: {inv.projectId})
-                        </span>
-                      </div>
-                      <div className="inv-meta-info">
-                        Кому: <span className="recipient-id">{inv.invitedUser}</span> | Роль: <span style={{ fontWeight: "600", color: "var(--primary-color)" }}>{inv.role === 'admin' ? 'Админ' : inv.role === 'member' ? 'Участник' : 'Наблюдатель'}</span>
-                      </div>
-                    </div>
-                    <div className="inv-actions-status">
-                      {inv.status === "pending" ? (
-                        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                          <span className="status-badge pending">В ожидании</span>
-                          <button 
-                            className="btn-icon-cancel" 
-                            onClick={() => onCancelInvite(inv.id)}
-                            title="Отменить и отозвать приглашение"
-                          >
-                            &times;
-                          </button>
-                        </div>
-                      ) : (
-                        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                          {inv.status === "accepted" && (
-                            <span className="status-badge accepted">Принято</span>
-                          )}
-                          {inv.status === "declined" && (
-                            <span className="status-badge declined">Отклонено</span>
-                          )}
-                          <button 
-                            className="btn-icon-delete" 
-                            onClick={() => onCancelInvite(inv.id)} // Uses the same filter callback
-                            title="Удалить из истории"
-                          >
-                            🗑️
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
+            <div className="inline-form">
+              <input
+                className="input"
+                value={joinId}
+                onChange={(e) => setJoinId(e.target.value)}
+                placeholder="Например, 1793472059183"
+                aria-label="ID проекта"
+              />
+              <button className="btn" disabled={!joinId.trim()}>
+                <Icon name="login" size={15} /> Вступить
+              </button>
+            </div>
+          </form>
         </div>
       </div>
     </div>
