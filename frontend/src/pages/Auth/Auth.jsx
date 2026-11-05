@@ -7,19 +7,13 @@ import "./Auth.css";
 
 // login → register → verify;  recover → recover-code → recover-password
 const COPY = {
-  login: ["С возвращением", "Войдите, чтобы продолжить работу с командой."],
-  register: ["Создать аккаунт", "Пара полей — и можно заводить первый проект."],
-  verify: ["Подтвердите почту", null],
-  recover: ["Восстановление пароля", "Пришлём код на почту, указанную при регистрации."],
-  "recover-code": ["Введите код", null],
-  "recover-password": ["Новый пароль", "Минимум 6 символов."],
+  login: ["Вход", null],
+  register: ["Регистрация", null],
+  verify: ["Подтверждение почты", null],
+  recover: ["Восстановление пароля", "Отправим код на почту, указанную при регистрации."],
+  "recover-code": ["Код из письма", null],
+  "recover-password": ["Новый пароль", "Не короче 6 символов."],
 };
-
-const PREVIEW = [
-  { name: "В работе", cards: [["Экран входа", "фронтенд", true], ["API приглашений", "бэкенд"]] },
-  { name: "На проверке", cards: [["Схема БД", "бэкенд"], ["Тёмная тема", "дизайн"]] },
-  { name: "Готово", cards: [["Канбан-доска", "фронтенд"]] },
-];
 
 function sessionFrom(data) {
   return { id: data.user.id, name: data.user.name, email: data.user.email, avatar: data.user.avatar || null };
@@ -167,8 +161,8 @@ export default function Auth({ onLoginSuccess }) {
   const [title, subtitle] = COPY[step];
   const codeSubtitle = (
     <>
-      Код отправлен на <b>{form.email.trim()}</b>. Почтового сервера в проекте нет — код
-      печатается в лог auth-service.
+      Отправили код на <b>{form.email.trim()}</b>. Почтового сервера нет, поэтому код
+      выводится в лог auth-service.
     </>
   );
 
@@ -191,54 +185,19 @@ export default function Auth({ onLoginSuccess }) {
 
   return (
     <div className="auth-page">
-      <section className="auth-showcase" aria-hidden="true">
+      <div className="auth-box">
         <div className="auth-brand">
-          <BrandMark size={34} />
+          <BrandMark size={28} />
           <span>Task Tracker</span>
         </div>
 
-        <div className="showcase-copy">
-          <h1>
-            Задачи, сроки и обсуждения
-            <br />
-            <span>в одном месте.</span>
-          </h1>
-          <p>Канбан-доска, приглашения в команду и чат по каждой задаче.</p>
-        </div>
-
-        <div className="showcase-board">
-          {PREVIEW.map((column, ci) => (
-            <div className="sb-column" key={column.name} style={{ animationDelay: `${ci * 90}ms` }}>
-              <div className="sb-column-head">
-                <span className={`sb-dot sb-dot-${ci}`} />
-                {column.name}
-                <span className="sb-count">{column.cards.length}</span>
-              </div>
-              {column.cards.map(([text, tag, urgent]) => (
-                <div className="sb-card" key={text}>
-                  <span className="sb-card-title">{text}</span>
-                  <span className="sb-card-meta">
-                    <span className="tag">{tag}</span>
-                    {urgent && <span className="badge badge-danger">Срочно</span>}
-                  </span>
-                </div>
-              ))}
-            </div>
-          ))}
-        </div>
-      </section>
-
-      <section className="auth-panel">
-        <div className="auth-box">
-          <div className="auth-brand auth-brand-mobile">
-            <BrandMark size={30} />
-            <span>Task Tracker</span>
-          </div>
-
-          <h2 className="auth-title">{title}</h2>
-          <p className="auth-subtitle">
-            {step === "verify" || step === "recover-code" ? codeSubtitle : subtitle}
-          </p>
+        <div className="auth-card">
+          <h1 className="auth-title">{title}</h1>
+          {(subtitle || step === "verify" || step === "recover-code") && (
+            <p className="auth-subtitle">
+              {step === "verify" || step === "recover-code" ? codeSubtitle : subtitle}
+            </p>
+          )}
 
           {error && <div className="notice notice-error auth-error">{error}</div>}
 
@@ -387,25 +346,26 @@ export default function Auth({ onLoginSuccess }) {
             </form>
           )}
 
-          <div className="auth-switch">
-            {step === "login" ? (
-              <>
-                Нет аккаунта?{" "}
-                <button type="button" className="link-btn" onClick={() => go("register")}>
-                  Зарегистрироваться
-                </button>
-              </>
-            ) : (
-              <>
-                {step === "register" ? "Уже есть аккаунт? " : ""}
-                <button type="button" className="link-btn" onClick={() => go("login")}>
-                  {step === "register" ? "Войти" : "Вернуться ко входу"}
-                </button>
-              </>
-            )}
-          </div>
         </div>
-      </section>
+
+        <p className="auth-switch">
+          {step === "login" ? (
+            <>
+              Нет аккаунта?{" "}
+              <button type="button" className="link-btn" onClick={() => go("register")}>
+                Зарегистрироваться
+              </button>
+            </>
+          ) : (
+            <>
+              {step === "register" ? "Уже есть аккаунт? " : ""}
+              <button type="button" className="link-btn" onClick={() => go("login")}>
+                {step === "register" ? "Войти" : "Вернуться ко входу"}
+              </button>
+            </>
+          )}
+        </p>
+      </div>
     </div>
   );
 }

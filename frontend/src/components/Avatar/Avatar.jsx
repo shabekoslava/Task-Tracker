@@ -1,7 +1,7 @@
 import { initials } from "../../lib/format";
 
 // Цвет фона выбирается по имени, чтобы у одного человека он был одинаковым везде
-const PALETTE = ["#e8643c", "#4f8cf0", "#36b37e", "#a26cf0", "#e6a23c", "#d9547a", "#2fb5b0"];
+const PALETTE = ["#e8643c", "#4f8cf0", "#c0892f", "#a26cf0", "#e6a23c", "#d9547a", "#2fb5b0"];
 
 function colorFor(seed) {
   let hash = 0;

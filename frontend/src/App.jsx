@@ -176,7 +176,7 @@ export default function App() {
 
   useEffect(() => {
     const title = selectedProject ? selectedProject.name : PAGE_TITLES[currentTab];
-    document.title = title ? `${title} · Task Tracker` : "Task Tracker";
+    document.title = title ? `${title} — Task Tracker` : "Task Tracker";
   }, [currentTab, selectedProject]);
 
   const userProjects = projects.filter((p) => p.members?.some((m) => m.id === currentUserId));

@@ -90,7 +90,7 @@ export default function Invite({
                       </span>
                       <span className="invite-meta">
                         Роль: {roleLabel(inv.role)}
-                        {inv.created_at && ` · ${formatDay(inv.created_at)}`}
+                        {inv.created_at && `, ${formatDay(inv.created_at)}`}
                       </span>
                     </div>
                     <div className="invite-actions">

@@ -380,7 +380,7 @@ export default function Messenger({
                     <Avatar name={userName(n.authorId)} src={userAvatar(n.authorId)} size={30} />
                     <span className="inbox-text">
                       <span className="inbox-meta">
-                        <b>{userName(n.authorId)}</b> в «{n.room.title}» · {formatDateTime(n.createdAt)}
+                        <b>{userName(n.authorId)}</b> в «{n.room.title}», {formatDateTime(n.createdAt)}
                       </span>
                       <span className="inbox-body">{n.text}</span>
                     </span>
@@ -397,8 +397,8 @@ export default function Messenger({
                 <p className="chat-sub">
                   {activeRoom.type === "personal" && "Личный диалог"}
                   {activeRoom.type === "group" && membersLabel(activeRoom.members.length)}
-                  {activeRoom.type === "project" && `Общий чат проекта · ${membersLabel(activeRoom.members.length)}`}
-                  {activeRoom.type === "task" && `Комментарии задачи · ${activeRoom.projectName}`}
+                  {activeRoom.type === "project" && `Чат проекта, ${membersLabel(activeRoom.members.length)}`}
+                  {activeRoom.type === "task" && `Комментарии к задаче в проекте «${activeRoom.projectName}»`}
                 </p>
               </div>
               <div className="chat-head-actions">
@@ -409,7 +409,7 @@ export default function Messenger({
                 )}
                 {activeRoom.type === "task" && (
                   <button className="btn btn-sm" onClick={() => onOpenTask(activeRoom.projectId, activeRoom.taskId)}>
-                    Открыть задачу <Icon name="arrowRight" size={14} />
+                    <Icon name="tasks" size={14} /> Открыть задачу
                   </button>
                 )}
                 {(activeRoom.type === "personal" || activeRoom.type === "group") && (

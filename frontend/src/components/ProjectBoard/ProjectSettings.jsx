@@ -141,7 +141,7 @@ export default function ProjectSettings({ project, users, currentUserId, current
                   <div className="member-info">
                     <span className="member-name">
                       {member?.name || m.id}
-                      {isMe && <span className="muted"> · вы</span>}
+                      {isMe && <span className="muted"> (вы)</span>}
                     </span>
                     <span className="member-id mono">{m.id}</span>
                   </div>

@@ -100,7 +100,6 @@ const PATHS = {
       <path d="M9.5 4.5v15" />
     </>
   ),
-  arrowRight: <path d="M5 12h14M13 6l6 6-6 6" />,
   login: <path d="M9 4H5.5A1.5 1.5 0 0 0 4 5.5v13A1.5 1.5 0 0 0 5.5 20H9M14 16l4-4-4-4M18 12H8" />,
   image: (
     <>

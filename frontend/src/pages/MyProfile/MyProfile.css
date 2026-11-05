@@ -90,6 +90,12 @@
   }
 
   .profile-hero {
-    flex-wrap: wrap;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 16px;
+  }
+
+  .profile-hero-actions {
+    align-self: stretch;
   }
 }
